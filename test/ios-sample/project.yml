@@ -1,0 +1,47 @@
+# XcodeGen spec。`xcodegen generate` で MonicaSample.xcodeproj を作る。xcodeproj はコミットしない。
+name: MonicaSample
+options:
+  bundleIdPrefix: net.accelhack.monica
+  deploymentTarget:
+    iOS: "13.0"
+  createIntermediateGroups: true
+configs:
+  Debug: debug
+  Release: release
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+packages:
+  Monica:
+    path: ../..
+targets:
+  MonicaSample:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+        excludes:
+          - Info.plist
+    dependencies:
+      - package: Monica
+        product: Monica
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: MONICA Sample
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        MonicaDSN: $(MONICA_DSN)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.accelhack.monica.sample
+        PRODUCT_NAME: MonicaSample
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+        # シミュレータ専用。実機に入れるときは YES にして DEVELOPMENT_TEAM を足す
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGN_IDENTITY: ""

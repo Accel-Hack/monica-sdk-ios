@@ -1,0 +1,67 @@
+name: release
+
+# SwiftPM の publish は git tag そのもの。利用者は
+# `.package(url: "https://github.com/Accel-Hack/monica-sdk-ios", from: "X.Y.Z")` で
+# tag を解決するので、registry へ上げる工程は無い。この workflow がやるのは
+#
+#   1. tag が main 上にあり、`Monica.sdkVersion`（envelope の sdk.version）と一致すること
+#   2. その commit で `swift test` と iOS 向け compile が通ること
+#   3. GitHub Release を作り、tag を「出荷した版」として人が読める形で残すこと
+#
+# 一致しない tag を弾くのは、SDK が名乗る版と利用者が入れた版がずれると、取り込み状況の
+# 集計（sdk.name / sdk.version 単位）が嘘になるため。tag は `X.Y.Z`（接頭辞なし）。
+# SwiftPM は `v` 付きも解決するが、1 repository = 1 package なので接頭辞で区別する
+# 必要が無い。
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release ${{ github.ref_name }}
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: tag が main 上にあり sdkVersion と一致するか
+        run: |
+          set -eu
+          TAG="${GITHUB_REF_NAME}"
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::tag ${TAG} は main 上の commit ではありません"
+            exit 1
+          fi
+          VERSION=$(sed -n 's/.*public static let sdkVersion = "\([^"]*\)".*/\1/p' Sources/Monica/Monica.swift)
+          if [ "${TAG}" != "${VERSION}" ]; then
+            echo "::error::tag ${TAG} と Monica.sdkVersion ${VERSION} が一致しません。Sources/Monica/Monica.swift を直してから tag を打ち直してください"
+            exit 1
+          fi
+
+      - name: 取り込んだ specが lockと一致するか
+        run: python3 scripts/spec-sync.py --check
+
+      - name: Swift SDK を検証
+        run: swift test
+
+      - name: iOS 向けにコンパイルできることを確認
+        run: |
+          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          swift build --scratch-path .build-ios \
+            -Xswiftc -sdk -Xswiftc "$SDK" -Xswiftc -target -Xswiftc arm64-apple-ios13.0-simulator \
+            -Xcc -isysroot -Xcc "$SDK" -Xcc -target -Xcc arm64-apple-ios13.0-simulator
+
+      - name: GitHub Release を作る
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --verify-tag --generate-notes \
+            --title "monica-swift ${GITHUB_REF_NAME}"

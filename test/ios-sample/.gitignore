@@ -1,0 +1,8 @@
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+build/
+Config/Local.xcconfig
+.swiftpm/
+Sources/Info.plist
+build*/
