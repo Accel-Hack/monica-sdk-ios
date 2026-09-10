@@ -92,6 +92,7 @@ monica.flush(timeout: 2)
 | `attachDeviceContext` | `true` | 端末 / OS / アプリ context |
 | `crashReportDirectory` | `Application Support/monica` | クラッシュ report と scope snapshot の置き場 |
 | `transport` | `URLSessionTransport` | テスト用の差し替え口 |
+| `onDiagnostic` | `os_log` | SDK の警告（`422` の `issues` など）の受け口。`{ _ in }` で黙らせる |
 
 ## 自動で集めるもの / 集めないもの
 
@@ -150,6 +151,39 @@ Xcode の archive は既定で symbol を strip する（`STRIP_INSTALLED_PRODUC
 - app target の Build Settings で `STRIP_INSTALLED_PRODUCT = NO`（バイナリが数百 KB 大きくなる）
 - dSYM を MONICA へ上げて server 側で symbolicate する（**未実装**）
 
+## ingest が envelope を拒んだとき
+
+`422` は envelope が schema に合っていないという返答で、`error.json` の `issues` が**直すべき field の path**
+（`$.items[0].request.method` など）を名指している。`beforeSend` で event を組み替えて必須キーを落とすと
+これが起き、気付かなければ「その経路のイベントが 1 件も届かない」状態が続く。そこで `422` は既定で 1 通の
+envelope につき 1 回警告する。出力先は `os_log`（subsystem `com.accelhack.monica` / category `transport`、
+iOS 13 で使える `os_log` を使い、iOS 14 の `os.Logger` は使わない）。
+
+```text
+monica: ingest rejected the envelope with 422 (invalid_envelope): 1 issue(s); $.items[0].request.method: Invalid type: Expected string
+```
+
+自分のログ基盤へ流す、あるいはデバッグ画面に出すなら `onDiagnostic` を渡す。`MonicaDiagnostic` は上の文面と、
+`MonicaTransportResult`（`accepted` / `status` / `errorCode` / `errorMessage` / `issues`）を持つ。
+`{ _ in }` を渡せば無効になる。DSN の key と envelope 本体は警告に載らない。
+
+```swift
+options.onDiagnostic = { diagnostic in
+  logger.warning("\(diagnostic.message)")
+  for issue in diagnostic.result.issues { debugPanel.add(issue.path, issue.message) }
+}
+```
+
+`MonicaTransport` からも同じものが取れる。`send(_:) -> Bool` に加えて
+`deliver(_:) -> MonicaTransportResult` があり、`MonicaClient` はこちらを呼ぶ。protocol の既定実装が
+`send` を包むので、`send` だけ実装した transport はそのまま動く。
+
+警告を出すのは transport なので、`transport` option で自作の transport に差し替えたときは
+`onDiagnostic` は呼ばれない（何を報告するかはその transport が決める）。
+
+`4xx`（`429` を除く）の body だけを 64 KiB まで読む。空・非 JSON・`error.json` に合わない・大きすぎる body は
+例外にせず「issues 無しの破棄」として扱う。`429` と `5xx` は再送するので body は読まない。
+
 ## 公開契約
 
 protocol は言語に依存しない契約なので、この repository は持たない。MONICA が
@@ -207,8 +241,7 @@ commit する。
 
 `transport.json` の `status` のうち、`413`（`split_and_retry`）は分割せず破棄する。`MonicaClient` が
 送信前に JSON の byte 数を検査して envelope を分割しているので、ingest が `413` を返す状況を作らないことで
-代えている。proxy が挟まって上限が下がると、分割せず破棄になる（データが黙って落ちる）。`error.json` の
-body は読んでいない（分岐は HTTP status だけで行う）。
+代えている。proxy が挟まって上限が下がると、分割せず破棄になる（データが黙って落ちる）。
 
 クラッシュ捕捉には 1 つ穴がある。alternate signal stack はスレッドごとの状態で、`install()` より前から
 動いていたスレッドには張れない。`install()` 時点のスレッドと、それ以降に作られるスレッドは

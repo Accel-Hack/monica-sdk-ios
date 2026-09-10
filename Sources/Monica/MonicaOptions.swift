@@ -40,6 +40,15 @@ public struct MonicaOptions {
   public var attachDeviceContext: Bool = true
   /// Replaces the HTTP transport. Intended for tests.
   public var transport: MonicaTransport?
+  /// Receives the warnings the SDK would otherwise write to `os_log`, together
+  /// with the ``MonicaTransportResult`` behind each one, so an application can
+  /// route them into its own logging or surface the `422` `issues` in a debug
+  /// screen. Nil (the default) means `os_log`; `{ _ in }` silences them.
+  ///
+  /// Called on the sender queue, not the main thread, and only for the
+  /// transport this SDK builds: a transport supplied through ``transport``
+  /// decides for itself what to report.
+  public var onDiagnostic: ((MonicaDiagnostic) -> Void)?
   /// Where the pending crash report and the scope snapshot live. Defaults to
   /// `Application Support/monica` inside the app container.
   public var crashReportDirectory: URL?
