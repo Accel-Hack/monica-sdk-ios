@@ -153,31 +153,20 @@ Xcode の archive は既定で symbol を strip する（`STRIP_INSTALLED_PRODUC
 
 ## ingest が envelope を拒んだとき
 
-`422` は envelope が schema に合っていないという返答で、`error.json` の `issues` が**直すべき field の path**
-（`$.items[0].request.method` など）を名指している。`beforeSend` で event を組み替えて必須キーを落とすと
-これが起き、気付かなければ「その経路のイベントが 1 件も届かない」状態が続く。そこで `422` は既定で 1 通の
-envelope につき 1 回警告する。出力先は `os_log`（subsystem `com.accelhack.monica` / category `transport`、
-iOS 13 で使える `os_log` を使い、iOS 14 の `os.Logger` は使わない）。
+`422`（envelope が schema に合っていない）と `401`（key が無効。以後この transport は送らない）は、
+envelope 1 通につき 1 回警告する。既定の出力先は `os_log`（subsystem `com.accelhack.monica` /
+category `transport`）。
 
 ```text
 monica: ingest rejected the envelope with 422 (invalid_envelope): 1 issue(s); $.items[0].request.method: Invalid type: Expected string
 ```
 
-`401`（`drop_and_stop`）も同じ経路で 1 回だけ警告する。key が失効した transport はそれ以降 1 通も送らないので、
-黙っていると「正常に送れている」と見分けが付かない。
+`422` の警告は `issues` が名指す**直すべき field の path** を含む。文面に載るのは先頭 10 件までで、
+残りは `; and N more` になる。DSN の key と envelope 本体は警告に載らない。
 
-```text
-monica: ingest rejected the envelope with 401 (unauthorized); no further envelopes will be sent
-```
-
-自分のログ基盤へ流す、あるいはデバッグ画面に出すなら `onDiagnostic` を渡す。`MonicaDiagnostic` は上の文面と、
-`MonicaTransportResult`（`accepted` / `stopped` / `status` / `errorCode` / `errorMessage` / `issues`）を持つ。
-`{ _ in }` を渡せば無効になる。DSN の key と envelope 本体は警告に載らない。
-
-警告の**文面**は issues が多いとき先頭 10 件までで、残りは `; and N more` に丸める。`os_log` にはメッセージ長の
-上限があり、30 件の batch が 422 になると後半の path が切り落とされるため。**この丸めは iOS / Android
-（モバイルのログ上限）固有**で、server 側の SDK は全件出す。`MonicaTransportResult.issues` は丸めず全件持つので、
-`onDiagnostic` からは全部読める。
+自分のログ基盤やデバッグ画面へ流すなら `onDiagnostic` を渡す。`{ _ in }` で無効になる。
+`MonicaDiagnostic` は文面（`message`）と `MonicaTransportResult`（`accepted` / `stopped` / `status` /
+`errorCode` / `errorMessage` / `issues`）を持つ。`issues` は丸めず全件入る。
 
 ```swift
 options.onDiagnostic = { diagnostic in
@@ -186,17 +175,15 @@ options.onDiagnostic = { diagnostic in
 }
 ```
 
-`MonicaTransport` からも同じものが取れる。`send(_:) -> Bool` に加えて
+`transport` option で自作の transport に差し替えたときは `onDiagnostic` は呼ばれない。
+
+同じ内容は `MonicaTransport` からも取れる。`send(_:) -> Bool` に加えて
 `deliver(_:) -> MonicaTransportResult` があり、`MonicaClient` はこちらを呼ぶ。protocol の既定実装が
-`send` を包むので、`send` だけ実装した transport はそのまま動く。`stopped` は `401` を受けて以後送らなく
-なったことを表し、「ingest に届かなかった（`status` が nil）」と区別できる。
+`send` を包むので、`send` だけ実装した transport はそのまま動く。`stopped` が true なら `401` で
+停止済み、`status` が nil なら ingest に届いていない。
 
-警告を出すのは transport なので、`transport` option で自作の transport に差し替えたときは
-`onDiagnostic` は呼ばれない（何を報告するかはその transport が決める）。
-
-`4xx`（`429` を除く）の body を `error.json` として解析する。**64 KiB を超える body は解析せず捨てる**
-（`URLSession` は body 全体を受信するので、通信量そのものは減らない）。空・非 JSON・`error.json` に
-合わない body も例外にせず「issues 無しの破棄」として扱う。`429` と `5xx` は再送するので body は読まない。
+`4xx`（`429` を除く）の body を `error.json` として解析する。64 KiB を超える body、空・非 JSON・
+`error.json` に合わない body は解析せず、issues 無しの破棄として扱う。`429` と `5xx` は body を読まない。
 
 ## 公開契約
 
