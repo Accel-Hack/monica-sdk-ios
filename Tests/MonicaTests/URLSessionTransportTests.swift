@@ -131,7 +131,7 @@ final class URLSessionTransportTests: XCTestCase {
     XCTAssertNil(try transport.deliver(envelope()).status, "no request means no status")
     XCTAssertEqual(StubProtocol.requests.count, 1)
     XCTAssertTrue(sleeps.isEmpty)
-    XCTAssertTrue(diagnostics.isEmpty, "401 is a key problem, not a payload problem")
+    XCTAssertEqual(diagnostics.count, 1, "the transport going quiet for good is worth saying once")
   }
 
   func testClosingStopsTheTransportBeforeTheSessionIsInvalidated() throws {
@@ -215,6 +215,37 @@ final class URLSessionTransportTests: XCTestCase {
     XCTAssertTrue(sleeps.isEmpty)
   }
 
+  func testSaysThatA401HasSilencedTheTransport() throws {
+    // The same warning path as a 422, with the wording every SDK uses: after a
+    // 401 nothing is ever sent again, and silence looks like success.
+    StubProtocol.reset([.init(status: 401, body: try json(["error": ["code": "unauthorized",
+                                                                    "message": "invalid key"]])),
+                        .init(status: 202)])
+    let transport = try transport()
+
+    let result = try transport.deliver(envelope())
+
+    XCTAssertFalse(result.accepted)
+    XCTAssertEqual(result.status, 401)
+    XCTAssertEqual(result.errorCode, "unauthorized")
+    XCTAssertEqual(diagnostics.count, 1)
+    XCTAssertEqual(diagnostics[0].message,
+                   "monica: ingest rejected the envelope with 401 (unauthorized); no further envelopes will be sent")
+    XCTAssertEqual(diagnostics[0].result.status, 401)
+
+    // Once only: the stopped transport does not reach ingest again.
+    XCTAssertFalse(try transport.send(envelope()))
+    XCTAssertEqual(diagnostics.count, 1)
+    XCTAssertEqual(StubProtocol.requests.count, 1)
+  }
+
+  func testA401WithoutABodyStillNamesTheStatus() throws {
+    StubProtocol.reset([.init(status: 401)])
+    XCTAssertFalse(try transport().send(envelope()))
+    XCTAssertEqual(diagnostics.map { $0.message },
+                   ["monica: ingest rejected the envelope with 401 (unknown); no further envelopes will be sent"])
+  }
+
   func testWarnsOnceEvenWhenTheBodyCarriesNoIssues() throws {
     StubProtocol.reset([.init(status: 422, body: try json(["error": ["code": "invalid_envelope",
                                                                     "message": "nope"]]))])
@@ -252,7 +283,8 @@ final class URLSessionTransportTests: XCTestCase {
   }
 
   func testAnotherClientErrorIsUnchangedAndNotWarnedAbout() throws {
-    // 400 is `drop` too, but it carries no field-level issues; only 422 warns.
+    // 400 is `drop` too, but it carries no field-level issues and does not stop
+    // the transport, so there is nothing to warn about: only 422 and 401 do.
     StubProtocol.reset([.init(status: 400, body: try json(["error": ["code": "bad_request",
                                                                      "message": "malformed"]]))])
     let result = try transport().deliver(envelope())

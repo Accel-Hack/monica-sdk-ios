@@ -74,19 +74,30 @@ enum MonicaDiagnostics {
   private static let log = OSLog(subsystem: subsystem, category: category)
   #endif
 
-  /// The wording all six SDKs share:
+  /// The wording all six SDKs share, or nil for a status not worth a warning.
+  ///
+  /// `422` names the fields to fix:
   /// `monica: ingest rejected the envelope with 422 (invalid_envelope): 1 issue(s); $.items[0].request.method: ...`
+  ///
+  /// `401` says that this was the last envelope:
+  /// `monica: ingest rejected the envelope with 401 (unauthorized); no further envelopes will be sent`
   ///
   /// Neither the DSN key nor the envelope is included: a warning must not turn
   /// into a leak of what was being reported.
-  static func message(for result: MonicaTransportResult) -> String {
-    let status = result.status.map(String.init) ?? "no response"
-    var text = "monica: ingest rejected the envelope with \(status) (\(result.errorCode ?? "unknown")): "
-      + "\(result.issues.count) issue(s)"
-    for issue in result.issues {
-      text += "; \(issue.path): \(issue.message)"
+  static func message(for result: MonicaTransportResult) -> String? {
+    let code = result.errorCode ?? "unknown"
+    switch result.status {
+    case 401:
+      return "monica: ingest rejected the envelope with 401 (\(code)); no further envelopes will be sent"
+    case 422:
+      var text = "monica: ingest rejected the envelope with 422 (\(code)): \(result.issues.count) issue(s)"
+      for issue in result.issues {
+        text += "; \(issue.path): \(issue.message)"
+      }
+      return text
+    default:
+      return nil
     }
-    return text
   }
 
   /// `os_log` at error level, the nearest thing `os_log` has to a warning

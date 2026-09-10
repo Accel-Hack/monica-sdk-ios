@@ -92,7 +92,7 @@ monica.flush(timeout: 2)
 | `attachDeviceContext` | `true` | 端末 / OS / アプリ context |
 | `crashReportDirectory` | `Application Support/monica` | クラッシュ report と scope snapshot の置き場 |
 | `transport` | `URLSessionTransport` | テスト用の差し替え口 |
-| `onDiagnostic` | `os_log` | SDK の警告（`422` の `issues` など）の受け口。`{ _ in }` で黙らせる |
+| `onDiagnostic` | `os_log` | SDK の警告（`422` の `issues`、`401` の停止）の受け口。`{ _ in }` で黙らせる |
 
 ## 自動で集めるもの / 集めないもの
 
@@ -161,6 +161,13 @@ iOS 13 で使える `os_log` を使い、iOS 14 の `os.Logger` は使わない�
 
 ```text
 monica: ingest rejected the envelope with 422 (invalid_envelope): 1 issue(s); $.items[0].request.method: Invalid type: Expected string
+```
+
+`401`（`drop_and_stop`）も同じ経路で 1 回だけ警告する。key が失効した transport はそれ以降 1 通も送らないので、
+黙っていると「正常に送れている」と見分けが付かない。
+
+```text
+monica: ingest rejected the envelope with 401 (unauthorized); no further envelopes will be sent
 ```
 
 自分のログ基盤へ流す、あるいはデバッグ画面に出すなら `onDiagnostic` を渡す。`MonicaDiagnostic` は上の文面と、

@@ -153,16 +153,18 @@ public final class URLSessionTransport: NSObject, MonicaTransport {
 
   /// A dropped `4xx`, with whatever `error.json` said about it.
   ///
-  /// A `422` also warns, once per envelope: `ingest.md` says to read the
-  /// `issues` and fix the payload, and a developer who never sees them cannot.
-  /// The retry loop cannot reach here twice for one envelope, because a `4xx`
-  /// other than `429` returns immediately.
+  /// A `422` warns once per envelope: `ingest.md` says to read the `issues` and
+  /// fix the payload, and a developer who never sees them cannot. A `401` warns
+  /// once too, because it is the last envelope this transport will ever send
+  /// and silence looks exactly like "everything is fine". The retry loop cannot
+  /// reach here twice for one envelope: a `4xx` other than `429` returns
+  /// immediately, and after a `401` `deliver` stops before sending.
   private func rejected(status: Int, body: Data?) -> MonicaTransportResult {
     let parsed = Self.parseErrorBody(body)
     let result = MonicaTransportResult(accepted: false, status: status, errorCode: parsed.code,
                                        errorMessage: parsed.message, issues: parsed.issues)
-    if status == 422 {
-      let diagnostic = MonicaDiagnostic(message: MonicaDiagnostics.message(for: result), result: result)
+    if let message = MonicaDiagnostics.message(for: result) {
+      let diagnostic = MonicaDiagnostic(message: message, result: result)
       if let onDiagnostic = onDiagnostic { onDiagnostic(diagnostic) } else { MonicaDiagnostics.emit(diagnostic) }
     }
     return result
