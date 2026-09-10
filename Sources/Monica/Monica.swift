@@ -80,7 +80,8 @@ public final class Monica {
     let release = options.release ?? environment?.appVersion
     let transport = options.transport
       ?? URLSessionTransport(dsn: validated.dsn, maxRetries: options.maxRetries,
-                             requestTimeout: options.requestTimeout, configuration: .ephemeral)
+                             requestTimeout: options.requestTimeout, configuration: .ephemeral,
+                             onDiagnostic: options.onDiagnostic)
     let client = MonicaClient(options: validated, transport: transport, inAppModules: inAppModules, release: release)
     if options.attachDeviceContext, let environment = environment {
       environment.apply(to: client.globalScope)

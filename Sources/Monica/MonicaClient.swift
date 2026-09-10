@@ -238,7 +238,10 @@ public final class MonicaClient {
       }
       let envelope = MonicaEnvelope(sdkName: Monica.sdkName, sdkVersion: Monica.sdkVersion, sentAt: sentAt,
                                     discarded: pendingDiscarded, items: Array(batch.prefix(fitting)))
-      let accepted = (try? transport.send(envelope)) ?? false
+      // `deliver` rather than `send`: it is the path that carries the status
+      // and the 422 issues, and it falls back to `send` for a transport that
+      // does not implement it.
+      let accepted = (try? transport.deliver(envelope))?.accepted ?? false
       if !accepted {
         lock.lock()
         discarded += pendingDiscarded + batch.count
