@@ -1,26 +1,20 @@
 name: ci
 
-# Swift SDK の検査。見るのは 2 つ。
+# macOS で `swift test`（契約テストを含む）が通り、iOS 13 simulator 向けに
+# コンパイルできることを見る。契約テストは spec/ の vendoring したコピーを
+# 読むだけなので network は要らない。
 #
-#   - test: macOS で `swift test`（契約テストを含む）が通り、iOS 13 simulator 向けに
-#           コンパイルできること。契約テストは spec/ の vendoring したコピーを読むだけ
-#           なので network は要らない
-#   - spec: 取り込んだ公開契約が配信元から動いていないこと
+# Linux 用 Swift で代替しない理由: UIKit の分岐と CryptoKit が無く、実際の
+# 配布先と条件が変わる。macOS runner は Linux の 10 倍の課金になるが、この
+# repository は SDK そのものなので paths で絞る余地は無い。
 #
-# Swift のツールチェーンと XCTest は macOS にしか無く、macOS runner は Linux の
-# 10 倍の課金になる。この repository は SDK そのものなので paths で絞る余地は無いが、
-# schedule では test を回さない（契約の drift は spec job だけで分かる）。
-# Linux 用 Swift で代替しない理由: UIKit の分岐と CryptoKit が無く、実際の配布先と
-# 条件が変わる。
+# 配信元との照合（`spec-sync.py --check-remote`）は CI では回さない。公開契約が
+# MONICA 側で動いたことは、取り込み直すときに手元で気付く。
 
 on:
   pull_request:
   push:
     branches: [main]
-  schedule:
-    # 公開契約は MONICA 側の都合で動く。PR が来るまで気付かないと、
-    # 気付いたときには「無関係な PR が落ちる」形で出てくる。
-    - cron: "23 21 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -33,7 +27,6 @@ permissions:
 jobs:
   test:
     name: Swift SDK / Xcode
-    if: github.event_name != 'schedule'
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -55,19 +48,3 @@ jobs:
           swift build --scratch-path .build-ios \
             -Xswiftc -sdk -Xswiftc "$SDK" -Xswiftc -target -Xswiftc arm64-apple-ios13.0-simulator \
             -Xcc -isysroot -Xcc "$SDK" -Xcc -target -Xcc arm64-apple-ios13.0-simulator
-
-  spec:
-    # 配信元を叩くので test から切り離してある。network の失敗で macOS job が
-    # 道連れになると、落ちた理由が読めなくなる。
-    name: 公開契約
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: 取り込んだ specが配信元と一致するか
-        # spec/ は https://spec.monica.accelhack.net/v1/ のコピー。配信元の
-        # index.json の revision を取り込み済みのものと比べるだけなので安い。
-        # ここが落ちたら python3 scripts/spec-sync.py で取り込み直し、
-        # swift test を通してから commit する。
-        run: python3 scripts/spec-sync.py --check-remote

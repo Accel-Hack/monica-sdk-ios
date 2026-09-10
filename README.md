@@ -198,9 +198,10 @@ schema の検証器は `Tests/MonicaTests/Contract/JSONSchema.swift` として d
 ゲートとして機能しなくなるため。緩和を取り込むと expected failure ではなくなる（ログに出なくなる）ので、
 それがこの印を消す合図。
 
-CI の `公開契約` job は `--check-remote` で配信元の `revision` を取り込み済みのものと比べる。落ちたら
-`python3 scripts/spec-sync.py` で取り込み直し、`swift test` を通してから commit する。schedule でも毎日回すので、
-契約が動けば PR を待たずに気付く。
+CI が回すのは `--check`（取り込んだコピーが `spec.lock.json` と一致するか）だけで、配信元との照合
+（`--check-remote`）は回さない。公開契約が MONICA 側で動いても CI は気付かないので、**取り込み直すのは
+手作業**になる。MONICA 側の変更を追う人が `python3 scripts/spec-sync.py` を実行し、`swift test` を通して
+commit する。
 
 ### まだ実装していない契約
 
