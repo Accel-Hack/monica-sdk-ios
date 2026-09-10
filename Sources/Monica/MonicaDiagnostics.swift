@@ -1,7 +1,5 @@
 import Foundation
-#if canImport(os)
 import os
-#endif
 
 /// One field-level complaint from ingest: `error.json` `validationIssue`.
 ///
@@ -26,6 +24,11 @@ public struct MonicaIssue: Equatable {
 /// `error.message` and the `issues`.
 public struct MonicaTransportResult {
   public var accepted: Bool
+  /// True once this transport has stopped for good — ingest answered `401`, or
+  /// `close()` invalidated the session — so later envelopes are dropped without
+  /// a request. It distinguishes that from an envelope that merely failed to get
+  /// through, the way `SendResult.isStopped()` does in monica-sdk-java.
+  public var stopped: Bool
   /// The HTTP status of the last attempt. Nil when nothing answered (I/O
   /// failure, timeout) or when the transport had already stopped on a `401`.
   public var status: Int?
@@ -37,8 +40,9 @@ public struct MonicaTransportResult {
   public var issues: [MonicaIssue]
 
   public init(accepted: Bool, status: Int? = nil, errorCode: String? = nil, errorMessage: String? = nil,
-              issues: [MonicaIssue] = []) {
+              issues: [MonicaIssue] = [], stopped: Bool = false) {
     self.accepted = accepted
+    self.stopped = stopped
     self.status = status
     self.errorCode = errorCode
     self.errorMessage = errorMessage
@@ -70,9 +74,14 @@ enum MonicaDiagnostics {
   static let subsystem = "com.accelhack.monica"
   static let category = "transport"
 
-  #if canImport(os)
   private static let log = OSLog(subsystem: subsystem, category: category)
-  #endif
+
+  /// `os_log` truncates a long line, and a 422 on a batch of 30 events can
+  /// carry more issues than fit. Only the first few are named; `issues` on the
+  /// result keeps every one of them, so nothing is actually lost. The cap is a
+  /// mobile-logging concern (monica-android does the same); the server-side
+  /// SDKs print them all.
+  static let maxIssuesInMessage = 10
 
   /// The wording all six SDKs share, or nil for a status not worth a warning.
   ///
@@ -91,9 +100,11 @@ enum MonicaDiagnostics {
       return "monica: ingest rejected the envelope with 401 (\(code)); no further envelopes will be sent"
     case 422:
       var text = "monica: ingest rejected the envelope with 422 (\(code)): \(result.issues.count) issue(s)"
-      for issue in result.issues {
+      for issue in result.issues.prefix(maxIssuesInMessage) {
         text += "; \(issue.path): \(issue.message)"
       }
+      let hidden = result.issues.count - maxIssuesInMessage
+      if hidden > 0 { text += "; and \(hidden) more" }
       return text
     default:
       return nil
@@ -102,11 +113,9 @@ enum MonicaDiagnostics {
 
   /// `os_log` at error level, the nearest thing `os_log` has to a warning
   /// (`.default` is not surfaced by Xcode's console filter by default).
+  /// The package only builds for Apple platforms (see `Package.swift`), so
+  /// there is no non-`os` fallback to keep alive.
   static func emit(_ diagnostic: MonicaDiagnostic) {
-    #if canImport(os)
     os_log("%{public}@", log: log, type: .error, diagnostic.message)
-    #else
-    FileHandle.standardError.write(Data((diagnostic.message + "\n").utf8))
-    #endif
   }
 }

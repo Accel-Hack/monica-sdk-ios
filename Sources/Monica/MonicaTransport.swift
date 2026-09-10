@@ -103,10 +103,14 @@ public final class URLSessionTransport: NSObject, MonicaTransport {
     return stopped
   }
 
-  private func stop() {
-    stateLock.lock()
+  /// Stops this transport, and says whether it was already stopped: a caller
+  /// that wants to warn about the stop should only do so on the transition.
+  @discardableResult
+  private func stop() -> Bool {
+    stateLock.lock(); defer { stateLock.unlock() }
+    let firstStop = !stopped
     stopped = true
-    stateLock.unlock()
+    return firstStop
   }
 
   /// `URLSession` retains its delegate and queue until invalidated, so waiting
@@ -128,17 +132,21 @@ public final class URLSessionTransport: NSObject, MonicaTransport {
   }
 
   public func deliver(_ envelope: MonicaEnvelope) throws -> MonicaTransportResult {
-    if isStopped { return MonicaTransportResult(accepted: false) }
+    // Already stopped: no request, and `stopped` says why, so the caller does
+    // not read this as a network failure.
+    if isStopped { return MonicaTransportResult(accepted: false, stopped: true) }
     let body = try Gzip.compress(try envelope.jsonData())
     for attempt in 0...maxRetries {
       // `close()` can land between two attempts, on another thread.
-      if isStopped { return MonicaTransportResult(accepted: false) }
+      if isStopped { return MonicaTransportResult(accepted: false, stopped: true) }
       switch perform(body) {
       case .status(let status, let retryAfter, let responseBody):
         if (200..<300).contains(status) { return MonicaTransportResult(accepted: true, status: status) }
         if status == 401 {
-          stop()
-          return rejected(status: status, body: responseBody)
+          // `stop()` reports whether this call is the one that stopped the
+          // transport, so two concurrent 401s warn once between them.
+          let firstStop = stop()
+          return rejected(status: status, body: responseBody, stopped: true, warn: firstStop)
         }
         if status != 429 && status < 500 { return rejected(status: status, body: responseBody) }
         if attempt == maxRetries { return MonicaTransportResult(accepted: false, status: status) }
@@ -159,11 +167,12 @@ public final class URLSessionTransport: NSObject, MonicaTransport {
   /// and silence looks exactly like "everything is fine". The retry loop cannot
   /// reach here twice for one envelope: a `4xx` other than `429` returns
   /// immediately, and after a `401` `deliver` stops before sending.
-  private func rejected(status: Int, body: Data?) -> MonicaTransportResult {
+  private func rejected(status: Int, body: Data?, stopped: Bool = false,
+                        warn: Bool = true) -> MonicaTransportResult {
     let parsed = Self.parseErrorBody(body)
     let result = MonicaTransportResult(accepted: false, status: status, errorCode: parsed.code,
-                                       errorMessage: parsed.message, issues: parsed.issues)
-    if let message = MonicaDiagnostics.message(for: result) {
+                                       errorMessage: parsed.message, issues: parsed.issues, stopped: stopped)
+    if warn, let message = MonicaDiagnostics.message(for: result) {
       let diagnostic = MonicaDiagnostic(message: message, result: result)
       if let onDiagnostic = onDiagnostic { onDiagnostic(diagnostic) } else { MonicaDiagnostics.emit(diagnostic) }
     }

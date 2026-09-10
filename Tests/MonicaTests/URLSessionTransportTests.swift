@@ -71,12 +71,16 @@ final class URLSessionTransportTests: XCTestCase {
   /// can be asserted on instead of being read by a human in Console.
   private var diagnostics: [MonicaDiagnostic] = []
 
-  private func transport(maxRetries: Int = 2) throws -> URLSessionTransport {
+  /// `capturesDiagnostics: false` leaves `onDiagnostic` nil, which is what an
+  /// application gets by default: the warning goes to `os_log` instead.
+  private func transport(maxRetries: Int = 2, capturesDiagnostics: Bool = true) throws -> URLSessionTransport {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [StubProtocol.self]
+    let sink: ((MonicaDiagnostic) -> Void)? = capturesDiagnostics
+      ? { [weak self] in self?.diagnostics.append($0) } : nil
     let transport = URLSessionTransport(dsn: try DSN.parse("https://mpk_public@ingest.monica.test:8443/42"),
                                         maxRetries: maxRetries, requestTimeout: 2, configuration: configuration,
-                                        onDiagnostic: { [weak self] in self?.diagnostics.append($0) })
+                                        onDiagnostic: sink)
     transport.sleep = { [weak self] in self?.sleeps.append($0) }
     return transport
   }
@@ -128,7 +132,9 @@ final class URLSessionTransportTests: XCTestCase {
     XCTAssertEqual(rejected.status, 401)
     XCTAssertTrue(transport.isStopped)
     XCTAssertFalse(try transport.send(envelope()), "nothing is sent after a 401")
-    XCTAssertNil(try transport.deliver(envelope()).status, "no request means no status")
+    let afterStop = try transport.deliver(envelope())
+    XCTAssertNil(afterStop.status, "no request means no status")
+    XCTAssertTrue(afterStop.stopped, "and `stopped` tells that apart from a network failure")
     XCTAssertEqual(StubProtocol.requests.count, 1)
     XCTAssertTrue(sleeps.isEmpty)
     XCTAssertEqual(diagnostics.count, 1, "the transport going quiet for good is worth saying once")
@@ -227,6 +233,7 @@ final class URLSessionTransportTests: XCTestCase {
 
     XCTAssertFalse(result.accepted)
     XCTAssertEqual(result.status, 401)
+    XCTAssertTrue(result.stopped)
     XCTAssertEqual(result.errorCode, "unauthorized")
     XCTAssertEqual(diagnostics.count, 1)
     XCTAssertEqual(diagnostics[0].message,
@@ -317,20 +324,71 @@ final class URLSessionTransportTests: XCTestCase {
     let result = try transport().deliver(envelope())
     XCTAssertFalse(result.accepted)
     XCTAssertNil(result.status, "nothing answered, so there is no status to report")
+    XCTAssertFalse(result.stopped, "a failure to reach ingest is not a revoked key")
     XCTAssertTrue(diagnostics.isEmpty)
   }
 
   func testATransportThatOnlyImplementsSendStillDelivers() throws {
     // The protocol default keeps transports written before `deliver` existed
     // working: accepted is whatever `send` returned, with nothing else to say.
-    let legacy = RecordingTransport()
+    // Through the existential, so this exercises the protocol witness the way a
+    // `MonicaOptions.transport` does, not a statically dispatched extension.
+    let recording = RecordingTransport()
+    let legacy: MonicaTransport = recording
     let accepted = try legacy.deliver(envelope())
     XCTAssertTrue(accepted.accepted)
     XCTAssertNil(accepted.status)
     XCTAssertEqual(accepted.issues, [])
-    legacy.accept = false
+    XCTAssertFalse(accepted.stopped)
+    recording.accept = false
     XCTAssertFalse(try legacy.deliver(envelope()).accepted)
-    XCTAssertEqual(legacy.envelopes.count, 2)
+    XCTAssertEqual(recording.envelopes.count, 2)
+  }
+
+  // MARK: the default sink
+
+  func testTheDefaultSinkTakesADiagnosticWithoutComplaint() throws {
+    // `onDiagnostic` nil means os_log. Nothing here can read the log back, so
+    // this only proves the default path runs: the OSLog handle is built, the
+    // format string matches its argument, and nothing traps.
+    let result = MonicaTransportResult(accepted: false, status: 422, errorCode: "invalid_envelope",
+                                       errorMessage: "envelope failed validation",
+                                       issues: [MonicaIssue(path: "$.items[0].request.method", message: "Invalid")])
+    MonicaDiagnostics.emit(MonicaDiagnostic(message: try XCTUnwrap(MonicaDiagnostics.message(for: result)),
+                                            result: result))
+    MonicaDiagnostics.emit(MonicaDiagnostic(message: "monica: %@ is not a format substitution", result: result))
+    XCTAssertEqual(MonicaDiagnostics.subsystem, "com.accelhack.monica")
+    XCTAssertEqual(MonicaDiagnostics.category, "transport")
+  }
+
+  func testAnUnprocessableEnvelopeIsStillReportedWithoutADiagnosticHook() throws {
+    let body = try json(["error": ["code": "invalid_envelope", "message": "no",
+                                   "issues": [["path": "$.items[0].timestamp", "message": "Invalid format"]]]])
+    StubProtocol.reset([.init(status: 422, body: body)])
+
+    // Warnings go to os_log here; the result must carry the issues all the same.
+    let result = try transport(capturesDiagnostics: false).deliver(envelope())
+
+    XCTAssertFalse(result.accepted)
+    XCTAssertEqual(result.issues, [MonicaIssue(path: "$.items[0].timestamp", message: "Invalid format")])
+    XCTAssertTrue(diagnostics.isEmpty, "nothing was hooked, so nothing was captured")
+  }
+
+  func testAVeryLongIssueListIsTrimmedInTheMessageOnly() throws {
+    // os_log truncates a long line, so the message names the first ten and
+    // counts the rest. The result keeps every issue.
+    let issues = (0..<12).map { ["path": "$.items[\($0)].timestamp", "message": "Invalid format"] }
+    StubProtocol.reset([.init(status: 422, body: try json(["error": ["code": "invalid_envelope",
+                                                                     "message": "no", "issues": issues]]))])
+
+    let result = try transport().deliver(envelope())
+
+    XCTAssertEqual(result.issues.count, 12)
+    let message = try XCTUnwrap(diagnostics.first?.message)
+    XCTAssertTrue(message.hasPrefix("monica: ingest rejected the envelope with 422 (invalid_envelope): 12 issue(s)"),
+                  message)
+    XCTAssertTrue(message.hasSuffix("; $.items[9].timestamp: Invalid format; and 2 more"), message)
+    XCTAssertFalse(message.contains("$.items[10]"), message)
   }
 
   func testCapsRetryAfterAndFallsBackToBackoffWhenUnparseable() {
