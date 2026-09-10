@@ -109,19 +109,32 @@ def sync(lock, origin):
             )
         fetched[path] = contents
 
+    # 先に消す。索引が limits.json を limits.json/http.json に変えた（あるいは
+    # その逆をした）とき、書き込みを先にやると os.makedirs / open が
+    # FileExistsError・IsADirectoryError で落ち、しかも何度やり直しても同じ
+    # ところで落ちる。取ってくるものは既に全部 memory にあるので、消してから
+    # 書いても取り込みは中断に強い。
+    before_contents = {}
+    for path in fetched:
+        target = mirror_path(lock["version"], path)
+        if os.path.isfile(target):
+            before_contents[path] = read_bytes(target)
+    removed = prune_mirror(lock["version"], list(fetched))
+
     added = []
     changed = []
     for path, contents in fetched.items():
         target = mirror_path(lock["version"], path)
-        before = read_bytes(target) if os.path.isfile(target) else None
+        before = before_contents.get(path)
         if before == contents:
             continue
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        with open(target, "wb") as handle:
-            handle.write(contents)
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "wb") as handle:
+                handle.write(contents)
+        except OSError as failure:
+            raise SyncError(path + ": 書き込めません: " + str(failure))
         (added if before is None else changed).append(path)
-
-    removed = prune_mirror(lock["version"], list(fetched))
 
     was_revision = lock["revision"]
     lock["revision"] = index["revision"]
@@ -355,12 +368,25 @@ def write_lock(lock):
 # --- 取得 ------------------------------------------------------------------
 
 
+class NoRedirects(urllib.request.HTTPRedirectHandler):
+    """索引は信頼の起点そのもの（全ファイルの digest と revision を載せている）。
+    リダイレクトを追うと、その起点が黙って別のホスト・別の scheme に差し替わる。
+    https を強制している意味も無くなるので、3xx はエラーにする。SDK 本体の
+    RedirectRefusingDelegate と同じ態度。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise SyncError(req.full_url + ": HTTP " + str(code) + " のリダイレクト（" + newurl + "）は追いません")
+
+
+OPENER = urllib.request.build_opener(NoRedirects)
+
+
 def fetch(url):
     """配信元から 1 ファイル。200 以外と、JSON として壊れている .json は失敗にする。
     半端な取り込みを commit させないため、呼び出し側は 1 つでも失敗したら止まる。"""
     request = urllib.request.Request(url, headers={"Accept": "*/*", "User-Agent": "monica-sdk-ios spec-sync"})
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+        with OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
             if response.status != 200:
                 raise SyncError(url + ": HTTP " + str(response.status))
             contents = response.read()

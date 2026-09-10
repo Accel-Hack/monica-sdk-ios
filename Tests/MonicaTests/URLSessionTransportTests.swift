@@ -120,6 +120,30 @@ final class URLSessionTransportTests: XCTestCase {
     XCTAssertTrue(sleeps.isEmpty)
   }
 
+  func testClosingStopsTheTransportBeforeTheSessionIsInvalidated() throws {
+    // `URLSession` raises an Objective-C exception ("Task created in a session
+    // that has been invalidated") when a task is created after
+    // `invalidateAndCancel`, and it cannot be caught from Swift: the process
+    // aborts. A `flush` that outlives its timeout leaves the sender queue
+    // draining, so a retry can reach `send` after `close()` has run.
+    StubProtocol.reset([.init(status: 202)])
+    let transport = try transport()
+    transport.close()
+    XCTAssertTrue(transport.isStopped)
+    XCTAssertFalse(try transport.send(envelope()), "nothing is sent after close()")
+    XCTAssertEqual(StubProtocol.requests.count, 0, "no task may be created on the invalidated session")
+  }
+
+  func testARetryAfterCloseDoesNotTouchTheInvalidatedSession() throws {
+    // The failure sequence in full: the first attempt is a 503, and `close()`
+    // lands while the transport is backing off.
+    StubProtocol.reset([.init(status: 503), .init(status: 202)])
+    let transport = try transport()
+    transport.sleep = { [weak transport] _ in transport?.close() }
+    XCTAssertFalse(try transport.send(envelope()))
+    XCTAssertEqual(StubProtocol.requests.count, 1, "the retry must be abandoned, not sent on a dead session")
+  }
+
   func testRetriesServerErrorsWithBackoffUntilAccepted() throws {
     StubProtocol.reset([.init(status: 503), .init(status: 500), .init(status: 202)])
     XCTAssertTrue(try transport().send(envelope()))

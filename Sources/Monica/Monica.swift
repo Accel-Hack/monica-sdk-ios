@@ -208,11 +208,16 @@ public final class Monica {
     // Same serial queue as `persistSession`, so the previous launch's
     // session.json is read before this launch overwrites it.
     sessionQueue.async {
-      guard let report = reporter.takePendingReport() else { return }
+      guard let report = reporter.readPendingReport() else { return }
+      if client.isShutDown { return }
       let event = CrashReporter.event(
         from: report, session: reporter.readSession(), fallbackEnvironment: fallbackEnvironment,
         fallbackRelease: fallbackRelease, fallbackContexts: fallbackContexts, inAppModules: inAppModules)
-      _ = client.capturePrepared(event)
+      let accepted = client.capturePrepared(event) != nil
+      // Keep the file for the next launch only when the client refused it for
+      // being closed. Sampling or a `beforeSend` that returned nil is a
+      // decision, not a failure, so the report is done with either way.
+      if accepted || !client.isShutDown { reporter.discardPendingReport() }
     }
   }
 

@@ -17,11 +17,14 @@ final class JSONSchema {
   enum LoadError: Error, CustomStringConvertible {
     case notAnObject(String)
     case unsupportedKeyword(String, at: String)
+    case malformedKeyword(String, at: String, expected: String)
     var description: String {
       switch self {
       case .notAnObject(let where_): return "\(where_) is not a JSON object"
       case .unsupportedKeyword(let keyword, let at):
         return "unsupported JSON Schema keyword `\(keyword)` at \(at); teach JSONSchema.swift before trusting the result"
+      case .malformedKeyword(let keyword, let at, let expected):
+        return "JSON Schema keyword `\(keyword)` at \(at) is not \(expected); teach JSONSchema.swift before trusting the result"
       }
     }
   }
@@ -68,9 +71,53 @@ final class JSONSchema {
     return try JSONSchema(copy)
   }
 
+  /// Checks the *shape* of every keyword's value, not just its name.
+  ///
+  /// Allowlisting names alone is not enough. `"type": ["string", "null"]` is
+  /// legal draft 2020-12 and would have loaded clean, and the validator's
+  /// `schema["type"] as? String` would then have been nil — dropping the type
+  /// constraint entirely instead of failing loudly, which is exactly what this
+  /// file's doc comment promises cannot happen. The same held for
+  /// `"enum": "x"`, `"required": "x"` and `"minLength": "3"`.
+  private static func auditShape(_ keyword: String, _ value: Any, at path: String) throws {
+    func require(_ condition: Bool, _ expected: String) throws {
+      if !condition { throw LoadError.malformedKeyword(keyword, at: path, expected: expected) }
+    }
+    func isInteger(_ value: Any) -> Bool {
+      guard let number = value as? NSNumber, !isBoolean(value) else { return false }
+      return number.doubleValue == number.doubleValue.rounded()
+    }
+    switch keyword {
+    case "$schema", "$id", "title", "description", "$ref", "pattern", "format":
+      try require(value is String, "a string")
+    case "type":
+      // Both forms draft 2020-12 allows. The array form is validated as a union.
+      if let names = value as? [Any] {
+        try require(!names.isEmpty && names.allSatisfy { $0 is String }, "a non-empty array of strings")
+      } else {
+        try require(value is String, "a string or an array of strings")
+      }
+    case "required":
+      try require((value as? [Any])?.allSatisfy { $0 is String } ?? false, "an array of strings")
+    case "enum", "anyOf":
+      try require((value as? [Any])?.isEmpty == false, "a non-empty array")
+    case "minLength", "maxLength", "minItems", "maxItems":
+      try require(isInteger(value), "an integer")
+    case "minimum":
+      try require(value is NSNumber && !isBoolean(value), "a number")
+    case "properties", "$defs", "items", "not", "additionalProperties", "propertyNames":
+      try require(value is [String: Any], "a JSON object")
+    case "const":
+      break // Any JSON value is a legal const.
+    default:
+      throw LoadError.unsupportedKeyword(keyword, at: path)
+    }
+  }
+
   private static func audit(_ schema: [String: Any], at path: String) throws {
     for (keyword, value) in schema {
       guard supported.contains(keyword) else { throw LoadError.unsupportedKeyword(keyword, at: path) }
+      try auditShape(keyword, value, at: path)
       switch keyword {
       case "properties", "$defs":
         for (name, sub) in (value as? [String: Any]) ?? [:] {
@@ -137,9 +184,14 @@ final class JSONSchema {
       }
       validate(value, against: target, path: path, issues: &issues)
     }
-    if let type = schema["type"] as? String, !Self.matches(type: type, value) {
-      issues.append(Issue(path: path, message: "expected \(type)"))
-      return
+    if let type = schema["type"] {
+      // `type` is either a name or a union of names; the audit has already
+      // rejected anything else.
+      let names = (type as? String).map { [$0] } ?? (type as? [String]) ?? []
+      if !names.contains(where: { Self.matches(type: $0, value) }) {
+        issues.append(Issue(path: path, message: "expected \(names.joined(separator: " or "))"))
+        return
+      }
     }
     if let allowed = schema["enum"] as? [Any], !allowed.contains(where: { Self.equal($0, value) }) {
       issues.append(Issue(path: path, message: "not one of \(allowed)"))

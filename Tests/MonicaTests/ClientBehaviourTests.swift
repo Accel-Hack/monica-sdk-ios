@@ -88,17 +88,50 @@ final class ClientBehaviourTests: XCTestCase {
     XCTAssertEqual(transport.envelopes.last?.discarded, 1, "the drop travels in the next envelope, as in the Java SDK")
   }
 
-  func testNonSerialisableContextIsDroppedLikeAnOversizedEvent() throws {
+  func testANonSerialisableContextIsRewrittenInsteadOfSilencingTheSDK() throws {
+    // `Date`, `URL`, `Double.nan` and any other object are not JSON. Failing at
+    // serialisation time was fatal in a way nothing could notice: a context set
+    // on the *scope* rides on every event, so every envelope failed to
+    // serialise, the client counted each one as oversized, and the SDK stopped
+    // reporting for the life of the process without a word.
     let transport = RecordingTransport()
     var options = options(transport)
     options.flushInterval = 60
     let monica = try Monica.install(options, platform: FakePlatform())
-    monica.captureMessage("poison", context: CaptureContext().context("payload", ["at": Date()]))
-    monica.captureMessage("fine")
-    XCTAssertFalse(monica.flush(timeout: 5))
+    monica.scope.setContext("session", ["startedAt": Date(timeIntervalSince1970: 0), "ratio": Double.nan])
+    monica.captureMessage("first", context: CaptureContext().context("payload", ["url": URL(string: "https://x.test/a")!]))
+    monica.captureMessage("second")
+    XCTAssertTrue(monica.flush(timeout: 5), "an unrepresentable value must not look like an oversized event")
 
-    XCTAssertEqual(transport.items.map { $0["message"] as? String }, ["fine"])
-    XCTAssertEqual(transport.envelopes.last?.discarded, 1)
+    XCTAssertEqual(transport.items.map { $0["message"] as? String }, ["first", "second"])
+    XCTAssertEqual(transport.envelopes.last?.discarded, 0)
+    let first = transport.items[0]
+    XCTAssertEqual(first.context("session", "startedAt") as? String, "1970-01-01T00:00:00.000Z")
+    XCTAssertEqual(first.context("session", "ratio") as? String, "nan")
+    XCTAssertEqual(first.context("payload", "url") as? String, "https://x.test/a")
+    // And the whole envelope really is serialisable.
+    XCTAssertNoThrow(try XCTUnwrap(transport.envelopes.first).jsonData())
+  }
+
+  func testAnEventBrokenByBeforeSendIsDroppedAloneRatherThanWithItsBatch() throws {
+    // `put(key, nil)` removes the key, which is the natural way to redact a
+    // field — and produces an item ingest answers 422 to. A 4xx drops the whole
+    // envelope, so one bad item used to take up to `batchSize` valid events
+    // with it, on every drain.
+    let transport = RecordingTransport()
+    var options = options(transport)
+    options.flushInterval = 60
+    options.beforeSend = { event, _ in
+      if event["message"] as? String == "redacted" { event.put("environment", nil) }
+      return event
+    }
+    let monica = try Monica.install(options, platform: FakePlatform())
+    XCTAssertNil(monica.captureMessage("redacted"))
+    XCTAssertNotNil(monica.captureMessage("kept"))
+    XCTAssertTrue(monica.flush(timeout: 5))
+
+    XCTAssertEqual(transport.items.map { $0["message"] as? String }, ["kept"])
+    XCTAssertEqual(transport.envelopes.last?.discarded, 1, "the broken item is accounted for")
   }
 
   func testBatchSizeIsClampedToTheEnvelopeLimitAndTheQueue() throws {
@@ -197,18 +230,47 @@ final class ClientBehaviourTests: XCTestCase {
     XCTAssertEqual(transport.items.map { $0["message"] as? String }, ["outer"])
   }
 
-  func testBeforeSendMayTouchMonicaCurrentWhileTheReinstallIsInProgress() throws {
-    // Monica.current must never wait on install or close.
-    let first = RecordingTransport()
-    let second = RecordingTransport()
-    var firstOptions = options(BlockingTransport())
+  func testMonicaCurrentDoesNotWaitOnAReinstallThatIsStuckFlushing() throws {
+    // `Monica.current` reads `currentLock`, never `lifecycleLock`, so it must
+    // not wait on an install that is stuck flushing the instance it replaces —
+    // which matters because an application's `beforeSend` is allowed to read
+    // it. The reinstall has to be genuinely blocked for this to mean anything:
+    // the first instance's transport holds its `send` open, so the sender queue
+    // is still inside application code when the second `install` calls
+    // `previous.shutdown()`.
+    let blocking = BlockingTransport()
+    var firstOptions = options(blocking)
     firstOptions.flushInterval = 60
-    firstOptions.transport = first
-    try Monica.install(firstOptions, platform: FakePlatform())
+    firstOptions.flushTimeout = 3
+    let first = try Monica.install(firstOptions, platform: FakePlatform())
+    // A fatal drains immediately, so the sender queue parks inside `send`.
+    first.captureMessage("blocking", context: CaptureContext().level(.fatal))
+    XCTAssertTrue(TestSupport.waitUntil { blocking.sends == 1 }, "the sender queue must be inside send()")
+
+    let reinstalled = DispatchSemaphore(value: 0)
+    var replacement: Monica?
+    DispatchQueue.global().async {
+      replacement = try? Monica.install(self.options(RecordingTransport()), platform: FakePlatform())
+      reinstalled.signal()
+    }
+    // Wait until that install is inside the retiring instance's flush.
+    XCTAssertTrue(TestSupport.waitUntil { Monica.current == nil })
+
+    // `install` clears `installed` before it retires the previous instance, so
+    // the answer during the window is nil — but it has to come back at once
+    // rather than after `flushTimeout`, and a capture must not wedge either.
     let started = Date()
-    let replacement = try Monica.install(options(second), platform: FakePlatform())
+    for _ in 0..<200 {
+      XCTAssertNil(Monica.current)
+      XCTAssertNil(first.captureMessage("during reinstall"), "the retiring instance stops accepting events")
+    }
+    let elapsed = Date().timeIntervalSince(started)
+    XCTAssertLessThan(elapsed, 1, "Monica.current waited on the reinstall (took \(elapsed)s)")
+
+    blocking.gate.signal()
+    XCTAssertEqual(reinstalled.wait(timeout: .now() + 10), .success)
+    XCTAssertNotNil(replacement)
     XCTAssertTrue(Monica.current === replacement)
-    XCTAssertLessThan(Date().timeIntervalSince(started), 2)
   }
 
   // MARK: scope precedence

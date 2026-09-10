@@ -156,11 +156,20 @@ final class CrashReporter {
     installed = false
   }
 
-  /// Reads and deletes the report the previous launch left behind, if any.
-  func takePendingReport() -> CrashReport? {
+  /// Reads the report the previous launch left behind, if any. The file stays
+  /// on disk until ``discardPendingReport()``: deleting it here would lose the
+  /// crash for good whenever the client turns out to be closed by the time the
+  /// event is ready (a consent callback calling `close()`, or a second
+  /// `install()`), which takes tens of milliseconds of symbolication away.
+  func readPendingReport() -> CrashReport? {
     guard let data = try? Data(contentsOf: reportURL) else { return nil }
-    try? FileManager.default.removeItem(at: reportURL)
     return CrashReport.parse(data)
+  }
+
+  /// Forgets the previous launch's report, once it has been handed to a client
+  /// that was still accepting events.
+  func discardPendingReport() {
+    try? FileManager.default.removeItem(at: reportURL)
   }
 
   func writeSession(_ session: [String: Any]) {

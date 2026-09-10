@@ -72,17 +72,32 @@ public final class URLSessionTransport: NSObject, MonicaTransport {
     session.invalidateAndCancel()
   }
 
-  /// True once ingest has answered `401`: the key is invalid or revoked, and
-  /// `transport.json` says to drop and stop. Nothing is sent afterwards; a new
-  /// `install()` with a working DSN creates a new transport.
+  /// True once this transport must not send again: ingest answered `401` (the
+  /// key is invalid or revoked, and `transport.json` says to drop and stop) or
+  /// `close()` invalidated the session. A new `install()` with a working DSN
+  /// creates a new transport.
   public var isStopped: Bool {
     stateLock.lock(); defer { stateLock.unlock() }
     return stopped
   }
 
+  private func stop() {
+    stateLock.lock()
+    stopped = true
+    stateLock.unlock()
+  }
+
   /// `URLSession` retains its delegate and queue until invalidated, so waiting
   /// for `deinit` would leak one session per install / close cycle.
+  ///
+  /// Stopping first is not a nicety: `URLSession` raises an Objective-C
+  /// exception ("Task created in a session that has been invalidated") when a
+  /// task is created after `invalidateAndCancel`, and that exception cannot be
+  /// caught from Swift. A `flush` that times out leaves the sender queue
+  /// draining, so without this flag a retry after `close()` would abort the
+  /// application.
   public func close() {
+    stop()
     session.invalidateAndCancel()
   }
 
@@ -90,13 +105,13 @@ public final class URLSessionTransport: NSObject, MonicaTransport {
     if isStopped { return false }
     let body = try Gzip.compress(try envelope.jsonData())
     for attempt in 0...maxRetries {
+      // `close()` can land between two attempts, on another thread.
+      if isStopped { return false }
       switch perform(body) {
       case .status(let status, let retryAfter):
         if (200..<300).contains(status) { return true }
         if status == 401 {
-          stateLock.lock()
-          stopped = true
-          stateLock.unlock()
+          stop()
           return false
         }
         if status != 429 && status < 500 { return false }

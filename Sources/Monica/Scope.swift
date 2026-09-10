@@ -23,10 +23,15 @@ public final class Scope {
     return self
   }
 
+  /// Values that `JSONSerialization` cannot carry (a `Date`, a `URL`, a
+  /// non-finite `Double`, any other object) are rewritten here rather than at
+  /// serialisation time: a scope context is copied onto every event, so one
+  /// unrepresentable value would otherwise stop the SDK sending anything at
+  /// all. See `JSONValues`.
   @discardableResult
   public func setContext(_ key: String, _ value: [String: Any]) -> Scope {
     lock.lock(); defer { lock.unlock() }
-    contexts[key] = value
+    contexts[key] = JSONValues.sanitized(value)
     return self
   }
 
@@ -35,7 +40,8 @@ public final class Scope {
   @discardableResult
   public func setUser(_ value: [String: Any]?) -> Scope {
     lock.lock(); defer { lock.unlock() }
-    user = (value?.isEmpty ?? true) ? nil : value
+    guard let value = value, !value.isEmpty else { user = nil; return self }
+    user = JSONValues.sanitized(value)
     return self
   }
 

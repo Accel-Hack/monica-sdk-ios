@@ -40,6 +40,29 @@ final class MonicaOptionsTests: XCTestCase {
     XCTAssertNil(validationError(options))
   }
 
+  /// `envelope.json` measures `maxLength` in code points. Measuring the
+  /// environment in grapheme clusters instead let 128 combining-mark or flag
+  /// clusters through install-time validation and then had ingest answer 422 to
+  /// every single event, with no configuration error anywhere.
+  func testTheEnvironmentBoundIsCountedInCodePointsNotGraphemeClusters() {
+    func error(_ environment: String) -> MonicaConfigurationError? {
+      var options = MonicaOptions(dsn: "https://mpk_k@ingest.monica.test/1", environment: environment)
+      options.transport = RecordingTransport()
+      return validationError(options)
+    }
+    let tooLong = "environment must be at most 128 code points"
+    // "e" + U+0301 is one cluster and two code points.
+    let accented = String(repeating: "e\u{0301}", count: 64)
+    XCTAssertEqual(accented.count, 64)
+    XCTAssertEqual(accented.unicodeScalars.count, 128)
+    XCTAssertNil(error(accented))
+    XCTAssertEqual(error(accented + "e\u{0301}"), .invalidValue(tooLong))
+    // A regional-indicator pair is one cluster and two code points too.
+    XCTAssertEqual(error(String(repeating: "\u{1F1EF}\u{1F1F5}", count: 65)), .invalidValue(tooLong))
+    XCTAssertNil(error(String(repeating: "x", count: 128)))
+    XCTAssertEqual(error(String(repeating: "x", count: 129)), .invalidValue(tooLong))
+  }
+
   func testDefaultsMatchTheAndroidSDK() {
     let options = MonicaOptions(dsn: "https://mpk_k@ingest.monica.test/1", environment: "production")
     XCTAssertEqual(options.maxBreadcrumbs, 50)

@@ -52,7 +52,10 @@ final class CrashHandlerTests: XCTestCase {
     raise(SIGSEGV)
 
     XCTAssertEqual(previousHandlerCalls, 1)
-    XCTAssertTrue(monica_crash_has_reported())
+    // The noop handler returned, so the process survived and the handler
+    // re-armed itself: a later crash is still capturable. In a real crash the
+    // previous disposition is SIG_DFL, which does not return.
+    XCTAssertFalse(monica_crash_has_reported())
     let data = try Data(contentsOf: URL(fileURLWithPath: reportPath))
     let report = try XCTUnwrap(CrashReport.parse(data))
     XCTAssertEqual(report.kind, .signal)
@@ -61,11 +64,12 @@ final class CrashHandlerTests: XCTestCase {
     XCTAssertFalse(report.images.isEmpty)
     XCTAssertLessThan(abs(report.timestamp.timeIntervalSinceNow), 5)
 
-    // The disposition is back to what it was, so a second signal would be the
-    // previous handler's alone.
+    // The previous handler was called with the disposition restored — that is
+    // what `previousHandlerCalls` proves — and then this handler took SIGSEGV
+    // back, because control returning means the process is still alive.
     var current = sigaction()
     sigaction(SIGSEGV, nil, &current)
-    XCTAssertTrue(isNoopHandler(current))
+    XCTAssertFalse(isNoopHandler(current), "the handler must be back in place for the next crash")
 
     // Frames symbolicate against this very process.
     let frames = CrashReporter.frames(for: report, inAppModules: [TestSupport.testImageName])
@@ -85,11 +89,37 @@ final class CrashHandlerTests: XCTestCase {
 
     raise(SIGSEGV)
     let first = try Data(contentsOf: URL(fileURLWithPath: reportPath))
+    XCTAssertEqual(CrashReport.parse(first)?.signal, SIGSEGV)
     raise(SIGBUS)
     let second = try Data(contentsOf: URL(fileURLWithPath: reportPath))
 
-    XCTAssertEqual(first, second)
+    // The chained handler returned both times, so the process survived both
+    // signals. A survived signal is not the crash worth keeping: the handler
+    // re-arms and the next signal is reported afresh. Leaving the first report
+    // in place instead — which is what this used to assert — meant the first
+    // delivery of any of the six signals was the last one that could ever be
+    // reported, even in a process that went on living.
+    XCTAssertEqual(CrashReport.parse(second)?.signal, SIGBUS)
     XCTAssertEqual(previousHandlerCalls, 2)
+  }
+
+  func testAReportWrittenByTheExceptionHandlerSurvivesALaterSignal() throws {
+    // The NSException handler writes its report and then abort()s. The SIGABRT
+    // that follows must not replace it, whatever the previous disposition does.
+    var ignore = sigaction()
+    ignore.__sigaction_u.__sa_handler = SIG_IGN
+    sigemptyset(&ignore.sa_mask)
+    var original = sigaction()
+    sigaction(SIGABRT, &ignore, &original)
+    defer { sigaction(SIGABRT, &original, nil) }
+
+    XCTAssertTrue(monica_crash_install(reportPath))
+    monica_crash_record_exception("NSRangeException", "index 5 beyond bounds", nil, 0)
+    raise(SIGABRT)
+
+    let report = try XCTUnwrap(CrashReport.parse(try Data(contentsOf: URL(fileURLWithPath: reportPath))))
+    XCTAssertEqual(report.kind, .exception)
+    XCTAssertEqual(report.name, "NSRangeException")
   }
 
   func testRecordsAnExceptionWithNameReasonAndTheGivenAddresses() throws {
@@ -170,8 +200,19 @@ final class CrashHandlerTests: XCTestCase {
     XCTAssertTrue(monica_crash_install(reportPath))
     raise(SIGSEGV)  // ignored afterwards, so the test process survives
 
-    XCTAssertTrue(monica_crash_has_reported())
-    XCTAssertTrue(FileManager.default.fileExists(atPath: reportPath))
+    // A previous disposition of SIG_IGN means the signal is survivable by
+    // definition, so the report describes a crash that is not happening: it is
+    // thrown away and the handler takes SIGSEGV back. Keeping it — which is
+    // what this used to assert — sent a `level: fatal` event on the next launch
+    // for a process that never died, and left crash capture disarmed for good.
+    XCTAssertFalse(monica_crash_has_reported())
+    XCTAssertFalse(FileManager.default.fileExists(atPath: reportPath))
+
+    var current = sigaction()
+    XCTAssertEqual(sigaction(SIGSEGV, nil, &current), 0)
+    XCTAssertNotEqual(unsafeBitCast(current.__sigaction_u.__sa_handler, to: UnsafeRawPointer?.self),
+                      unsafeBitCast(SIG_IGN, to: UnsafeRawPointer?.self),
+                      "the handler must be back in place for the next crash")
   }
 
   func testInstallsEverySignalItPromisesAndRemovesThemAll() {
@@ -348,6 +389,39 @@ final class CrashHandlerTests: XCTestCase {
     XCTAssertEqual(event.context("os", "name") as? String, "iOS")
     let meta = event.mechanism["meta"] as? [String: Any]
     XCTAssertEqual((meta?["signal"] as? [String: Any])?["number"] as? Int, Int(SIGTRAP))
+  }
+
+  func testReadingThePendingReportLeavesItOnDiskUntilItIsExplicitlyDiscarded() throws {
+    // Deleting on read lost the crash for good whenever the client turned out
+    // to be closed by the time the event was ready — a consent callback calling
+    // close(), or a second install() — because symbolicating up to 128 frames
+    // takes long enough for that to happen.
+    XCTAssertTrue(monica_crash_install(reportPath))
+    monica_crash_record_exception("NSRangeException", "boom", nil, 0)
+    monica_crash_uninstall()
+
+    let reporter = CrashReporter(directory: directory)
+    XCTAssertNotNil(reporter.readPendingReport())
+    XCTAssertTrue(FileManager.default.fileExists(atPath: reportPath), "reading must not consume the report")
+    XCTAssertNotNil(reporter.readPendingReport(), "so a later launch can still find it")
+    reporter.discardPendingReport()
+    XCTAssertNil(reporter.readPendingReport())
+    XCTAssertFalse(FileManager.default.fileExists(atPath: reportPath))
+  }
+
+  func testAnImageWithNoPathStillProducesAUsableFilename() throws {
+    // The C handler leaves monica_crash_image.path zeroed when dladdr fails for
+    // a loaded image. `frame.filename` has minLength 1 in envelope.json, so an
+    // empty one would have had ingest reject the whole envelope — losing the
+    // crash and every other item travelling with it.
+    let report = CrashReport(kind: .signal, signal: SIGSEGV, code: 1, faultAddress: 0, timestamp: Date(),
+                             frames: [0x1000_0010], images: [.init(loadAddress: 0x1000_0000, uuid: nil, path: "")],
+                             name: nil, reason: nil)
+    let frames = CrashReporter.frames(for: report, inAppModules: ["MyApp"])
+    XCTAssertFalse(frames.isEmpty)
+    for frame in frames {
+      XCTAssertFalse((frame["filename"] as? String ?? "").isEmpty, "\(frame)")
+    }
   }
 
   func testInstallSendsThePreviousLaunchsCrashAndForgetsIt() throws {

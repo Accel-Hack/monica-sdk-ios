@@ -116,6 +116,10 @@ public final class MonicaClient {
     return closed
   }
 
+  /// True once `close()` has run. The crash-report path reads it so it does not
+  /// delete the previous launch's report on a client that can no longer send it.
+  var isShutDown: Bool { isClosed }
+
   // MARK: internals
 
   private func baseEvent(level: MonicaLevel) -> MonicaEvent {
@@ -139,7 +143,16 @@ public final class MonicaClient {
   private func prepareAndEnqueue(_ original: MonicaEvent, hint: CaptureHint, applyScope: Bool) -> String? {
     if random() >= options.options.sampleRate { return nil }
     if applyScope { globalScope.apply(to: original) }
-    guard let event = runBeforeSend(original, hint: hint) else { return nil }
+    guard let hooked = runBeforeSend(original, hint: hint) else { return nil }
+    guard let event = validatedForWire(hooked) else {
+      // A hook that removed `environment` or wrote a non-string tag would make
+      // ingest answer 422 for the whole envelope, taking up to `batchSize`
+      // valid events down with it. Drop this one instead, and account for it.
+      lock.lock()
+      discarded += 1
+      lock.unlock()
+      return nil
+    }
     let eventId = event.eventId
     var sendNow = false
     lock.lock()
@@ -168,6 +181,28 @@ public final class MonicaClient {
 
   private static var isInsideBeforeSend: Bool {
     Thread.current.threadDictionary[inBeforeSendKey] as? Bool == true
+  }
+
+  /// The obligations `spec/v1/envelope.json` puts on an error item that
+  /// `beforeSend` can break. The hook takes an untyped bag and `put(key, nil)`
+  /// removes the key, so redacting a field is the natural way to produce an
+  /// item ingest will reject.
+  ///
+  /// Values are also made JSON-representable here (`beforeSend` may have
+  /// written a `Date`), because a single unrepresentable value would otherwise
+  /// fail the whole envelope.
+  private func validatedForWire(_ event: MonicaEvent) -> MonicaEvent? {
+    guard event["type"] as? String == "error" else { return nil }
+    for key in ["event_id", "timestamp", "platform", "environment"] {
+      guard let value = event[key] as? String, !value.isEmpty else { return nil }
+    }
+    guard event.level != nil else { return nil }
+    guard let environment = event["environment"] as? String,
+          environment.unicodeScalars.count <= MonicaOptions.maxEnvironmentLength else { return nil }
+    if event["tags"] != nil && event["tags"] as? [String: String] == nil { return nil }
+    let values = event.values
+    if JSONSerialization.isValidJSONObject(values) { return event }
+    return MonicaEvent(JSONValues.sanitized(values))
   }
 
   private var queued: Int {

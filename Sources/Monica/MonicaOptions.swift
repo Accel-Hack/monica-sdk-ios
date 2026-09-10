@@ -5,12 +5,16 @@ import Foundation
 public struct MonicaOptions {
   /// `limits.json` `items_per_envelope`: a batch never exceeds it.
   public static let maxItemsPerEnvelope = 100
-  /// `envelope.json` `errorItem.environment.maxLength`.
+  /// `envelope.json` `errorItem.environment.maxLength`. JSON Schema counts
+  /// `maxLength` in code points, so this is compared against
+  /// `unicodeScalars.count` and never `String.count`: 128 grapheme clusters of
+  /// combining marks or flag emoji are 256 or more code points, and would be
+  /// accepted here only to be rejected by ingest on every event.
   public static let maxEnvironmentLength = 128
 
   /// The project DSN. It must carry a public `mpk_` key.
   public var dsn: String
-  /// `production`, `staging`, ... At most 128 characters.
+  /// `production`, `staging`, ... At most 128 code points.
   public var environment: String
   /// Defaults to the bundle's `CFBundleShortVersionString`.
   public var release: String?
@@ -51,8 +55,9 @@ public struct MonicaOptions {
     let parsedDSN = try DSN.parse(dsn)
     let trimmedEnvironment = environment.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmedEnvironment.isEmpty { throw MonicaConfigurationError.emptyEnvironment }
-    if trimmedEnvironment.count > Self.maxEnvironmentLength {
-      throw MonicaConfigurationError.invalidValue("environment must be at most \(Self.maxEnvironmentLength) characters")
+    if trimmedEnvironment.unicodeScalars.count > Self.maxEnvironmentLength {
+      throw MonicaConfigurationError.invalidValue(
+        "environment must be at most \(Self.maxEnvironmentLength) code points")
     }
     if !(0...1).contains(sampleRate) {
       throw MonicaConfigurationError.invalidValue("sampleRate must be between 0 and 1")

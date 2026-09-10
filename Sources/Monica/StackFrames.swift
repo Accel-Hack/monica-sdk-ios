@@ -67,16 +67,25 @@ enum StackFrames {
   /// Xcode 16+ Debug builds put the app's code in `<App>.debug.dylib` next to a
   /// stub executable (confirmed 2026-09-03 with Xcode 26.6). The frames belong
   /// to the app all the same, so the suffix is dropped.
+  ///
+  /// The result is never empty. `envelope.json` gives `frame.filename` a
+  /// `minLength` of 1, and the crash path can hand us an empty image path: the
+  /// C handler leaves `monica_crash_image.path` zeroed when `dladdr` fails for
+  /// a loaded image, and an empty `filename` would have made ingest reject the
+  /// whole envelope — losing the crash and every other item travelling with it.
   static func moduleName(ofImagePath path: String) -> String {
     var name = (path as NSString).lastPathComponent
     if name.isEmpty { name = path }
     if name.hasSuffix(".debug.dylib") { name.removeLast(".debug.dylib".count) }
-    return name
+    return name.isEmpty ? "unknown" : name
   }
 
   private static let objcMethod = try! NSRegularExpression(pattern: "[-+]\\[([A-Za-z_][A-Za-z0-9_]*)")
 
   static func filename(module: String, symbol: String?) -> String {
+    // `minLength: 1`; a module name only ever arrives empty through a caller
+    // that bypassed `moduleName(ofImagePath:)`.
+    let module = module.isEmpty ? "unknown" : module
     guard let symbol = symbol, !symbol.isEmpty else { return module }
     // The Swift module is normally the image name, but not always (a product
     // named "My App" builds module My_App), so read it off the mangling when
