@@ -73,6 +73,14 @@ monica.captureMessage("payment retry exhausted", context: CaptureContext().level
 `captureError` / `captureMessage` は送った event の `event_id` を返す（sampling や `beforeSend` で捨てられたときは nil）。
 `CaptureContext` は `level(_:)` / `message(_:)` / `handled(_:)` / `tag(_:_:)` / `context(_:_:)` を繋いで作る。
 
+### event になるもの
+
+Swift の `Error` はスタックを持たないので、`captureError` を呼んだ場所のスタックが載る。
+`exception.values[].type` は Swift の型名（`MyApp.CheckoutError`）、`NSError` は domain。
+`NSUnderlyingErrorKey` を辿って cause chain にする（外側から内側の順、最大 8 段）。
+frame の `filename` は symbol から導出する（`MyApp.Checkout.pay()` は `MyApp/Checkout.swift`、
+`-[ViewController viewDidLoad]` は `MyApp/ViewController.m`）。symbol が無い frame は image 名だけになる。
+
 ### scope
 
 scope は全 event に載る tag / context / breadcrumb / user。
@@ -156,12 +164,12 @@ options.beforeSend = { event, hint in
 
 | | |
 | --- | --- |
-| `contexts.device` | `manufacturer: Apple`、model identifier（`iPhone15,2`） |
+| `contexts.device` | `manufacturer`（`Apple`）、`model`（`iPhone15,2`）、シミュレータでは `simulator: true` |
 | `contexts.os` | `name`（`iOS` / `macOS` など）、`version` |
-| `contexts.app` | bundle identifier、`app_version`（`CFBundleShortVersionString`）、`app_build`（`CFBundleVersion`） |
+| `contexts.app` | `app_identifier`（bundle identifier）、`app_version`（`CFBundleShortVersionString`）、`app_build`（`CFBundleVersion`） |
 
 `trackAppLifecycle` が true のとき、`active` / `inactive` / `background` / `foreground` / `memory_warning` の遷移を
-category `app.lifecycle` の breadcrumb に残す。
+category `app.lifecycle` の breadcrumb に残す（UIKit のあるプラットフォームだけ。macOS では記録しない）。
 
 `identifierForVendor`、端末名、広告 ID、アカウント、位置情報は**一切読まない**。パーミッションを要求する API も呼ばない。
 利用者を指す値は `setUser()` と `beforeSend` で明示したものだけが送られる。
@@ -169,13 +177,10 @@ category `app.lifecycle` の breadcrumb に残す。
 ## 送信結果と診断
 
 ingest が envelope を拒んだとき、SDK は `os_log`（subsystem `com.accelhack.monica` / category `transport`）へ
-1 行の警告を出す。`422`（envelope が schema に合わない）は直すべき field の path を、
-`401`（key が無効。以後この transport は送らない）は送信を止めたことを含む。
+1 行の警告を出す。`onDiagnostic` を渡すと、同じ警告と ingest の応答を自分のログ基盤やデバッグ画面へ流せる。
 
-`onDiagnostic` を渡すと同じ警告を自分のログ基盤やデバッグ画面へ流せる（`MonicaDiagnostic` が
-文面と `MonicaTransportResult`（`accepted` / `stopped` / `status` / `errorCode` / `errorMessage` / `issues`）を持つ）。
-
-警告の読み方、status ごとの対処、retry と queue の挙動は [TROUBLESHOOTING.md](TROUBLESHOOTING.md) に書いてある。
+警告の読み方、status ごとの対処、`onDiagnostic` が受け取る値、retry と queue の挙動は
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md) に書いてある。
 
 ## 制約
 
