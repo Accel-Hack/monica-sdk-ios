@@ -1,0 +1,4 @@
+// DSN はコミットしない。Config/Local.xcconfig（gitignore 済み）か、
+// `xcodebuild MONICA_DSN=...` の build setting で渡す。
+MONICA_DSN =
+#include? "Local.xcconfig"

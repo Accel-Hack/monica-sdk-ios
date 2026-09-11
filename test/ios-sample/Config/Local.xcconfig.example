@@ -1,0 +1,3 @@
+// cp Local.xcconfig.example Local.xcconfig して値を埋める。
+// xcconfig では `//` がコメントになるので、URL は `$()` で区切る。
+MONICA_DSN = https:/$()/mpk_xxx@ingest.stg.monica.accelhack.net/<slug>

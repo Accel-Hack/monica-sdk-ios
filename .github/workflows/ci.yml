@@ -1,0 +1,50 @@
+name: ci
+
+# macOS で `swift test`（契約テストを含む）が通り、iOS 13 simulator 向けに
+# コンパイルできることを見る。契約テストは spec/ の vendoring したコピーを
+# 読むだけなので network は要らない。
+#
+# Linux 用 Swift で代替しない理由: UIKit の分岐と CryptoKit が無く、実際の
+# 配布先と条件が変わる。macOS runner は Linux の 10 倍の課金になるが、この
+# repository は SDK そのものなので paths で絞る余地は無い。
+#
+# 配信元との照合（`spec-sync.py --check-remote`）は CI では回さない。公開契約が
+# MONICA 側で動いたことは、取り込み直すときに手元で気付く。
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Swift SDK / Xcode
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: 取り込んだ specが lockと一致するか
+        # 契約テストも同じ照合をするが、こちらの方が落ちた理由が読みやすい。
+        run: python3 scripts/spec-sync.py --check
+
+      # swift test がテストごとビルドするので、別に swift build は走らせない
+      - name: Swift SDK を検証
+        run: |
+          swift --version
+          swift test
+
+      - name: iOS 向けにコンパイルできることを確認
+        run: |
+          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          swift build --scratch-path .build-ios \
+            -Xswiftc -sdk -Xswiftc "$SDK" -Xswiftc -target -Xswiftc arm64-apple-ios13.0-simulator \
+            -Xcc -isysroot -Xcc "$SDK" -Xcc -target -Xcc arm64-apple-ios13.0-simulator
