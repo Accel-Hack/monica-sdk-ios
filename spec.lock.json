@@ -1,10 +1,10 @@
 {
   "origin": "https://spec.monica.accelhack.net",
   "version": "v1",
-  "revision": "9d5f65ea1f3d0ce041390bd9d434861840e2b0df6c925f2494790af967cba817",
+  "revision": "0cad0e46dff0f4dfabd8932f7967f57bf8493b4a57bee48a5349ba509a18a042",
   "files": {
     "README.md": "8149a3bea5896af8b22f37d26afcece48ed2acf89d3130e426a4cabdee672d8a",
-    "envelope.json": "638bf72a02479971360868f46d1d0bf949d33b8d17ff7a24b131a2c92c04efe1",
+    "envelope.json": "8f1b75d1417b111ad87a02d840e2e4e4943e05105a1530022c0f1217bb6ac95b",
     "error.json": "3db6dd5d1e6c330bbedf2b8d801744d68b43ac0f77c220565affc5c3c760b519",
     "ingest.md": "110c6f7cead38e851fb57d164a62932aa6bef44021e0dfcbb9210f8a2eb47302",
     "limits.json": "d75f08e62a0304a70e1c8c82ce3738a37433f910dd86c69d65699734180fe58f",

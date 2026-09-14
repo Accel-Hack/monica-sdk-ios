@@ -84,7 +84,8 @@
             "javascript",
             "node",
             "java",
-            "php"
+            "php",
+            "swift"
           ],
           "type": "string"
         },
