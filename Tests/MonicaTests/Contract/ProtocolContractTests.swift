@@ -90,8 +90,10 @@ final class ProtocolContractTests: XCTestCase {
   }
 
   /// The published `platform` enum has to name `swift`, or ingest answers 422
-  /// to every event this SDK sends. DEC57 added it; this is what catches the
-  /// value being taken back out the next time the bundle is re-vendored.
+  /// to every event this SDK sends. MONICA adds a value per SDK rather than
+  /// accepting any string, so `swift` is only there as long as the bundle says
+  /// so: this is what catches it being taken back out when the bundle is
+  /// re-vendored.
   func testPlatformSwiftIsAcceptedByTheVendoredSchema() throws {
     let issues = bundle.schema.validate(Monica.platformName, at: "/$defs/errorItem/properties/platform")
     XCTAssertTrue(issues.isEmpty,
