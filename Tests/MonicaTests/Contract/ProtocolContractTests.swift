@@ -648,12 +648,23 @@ final class ProtocolContractTests: XCTestCase {
         options.maxQueueSize = 2
         options.batchSize = 2
       }
-      // batchSize == maxQueueSize sends as soon as the queue fills; the sender
-      // runs on its own queue, so flood faster than it drains and let the
-      // discarded count travel with whatever leaves last.
-      for index in 0..<40 { monica.captureMessage("m\(index)") }
+      // batchSize == maxQueueSize sends as soon as the queue fills, and the
+      // queue can only overflow while the sender is busy with that first
+      // envelope. Wait until it really is parked in `send` — merely holding the
+      // gate does not say it ever got there — and the rest is arithmetic: of
+      // the 40 captures, 2 left with the parked drain and 2 stay queued, so 36
+      // are dropped and travel with the envelope that leaves next.
+      transport.hold()
+      monica.captureMessage("m0")
+      monica.captureMessage("m1")
+      XCTAssertTrue(TestSupport.waitUntil(timeout: 10) { transport.envelopes.count == 1 },
+                    "the sender queue must be inside send()")
+      for index in 2..<40 { monica.captureMessage("m\(index)") }
+      transport.open()
       XCTAssertTrue(monica.flush(timeout: 10))
       monica.close()
+      XCTAssertEqual(transport.envelopes.count, 2)
+      XCTAssertEqual(transport.envelopes.map { $0.discarded }, [0, 36])
       let reporting = transport.envelopes.first { $0.discarded > 0 }
       try record("a full queue that dropped events", try XCTUnwrap(reporting, "one envelope must carry the discarded count"))
     }
