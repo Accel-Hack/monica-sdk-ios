@@ -225,13 +225,8 @@ schema の検証器は `Tests/MonicaTests/Contract/JSONSchema.swift` として d
 自前実装し、未対応の keyword は黙って通さず例外にする。
 
 `platform: swift` が配信中の schema に受理されることは、契約テストの 1 件（`testPlatformSwiftIsAcceptedByTheVendoredSchema`）
-が単独で見る。MONICA 側が `platform` の値検証を外す変更を配信して取り込み直すまでは、この 1 件だけが成立しない。
-他のテストは、その緩和を当てた schema で残りの義務をすべて検査する。
-
-この 1 件は `XCTExpectFailure(strict: false)` で「今は落ちる」と印を付けてある。赤いままにすると
-`release.yml` の検証も落ちて tag から Release を作れなくなり、`swift test` の赤が常態化して他の 103 件が
-ゲートとして機能しなくなるため。緩和を取り込むと expected failure ではなくなる（ログに出なくなる）ので、
-それがこの印を消す合図。
+が単独で見る。MONICA 側が enum に `swift` を追加したものを取り込み済み（revision `0cad0e46dff0`）なので、この 1 件は
+成立している。取り込み直しで値が消えれば、ここが落ちる。
 
 CI が回すのは `--check`（取り込んだコピーが `spec.lock.json` と一致するか）だけで、配信元との照合
 （`--check-remote`）は回さない。公開契約が MONICA 側で動いても CI は気付かないので、**取り込み直すのは

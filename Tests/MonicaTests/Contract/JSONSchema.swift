@@ -53,24 +53,6 @@ final class JSONSchema {
     return try JSONSchema(object)
   }
 
-  /// A copy with the sub-schema at `pointer` replaced. Used to validate
-  /// against a relaxation the bundle has not shipped yet; see the contract test.
-  func replacing(pointer: String, with replacement: [String: Any]) throws -> JSONSchema {
-    var copy = root
-    let segments = pointer.split(separator: "/").map(String.init).filter { !$0.isEmpty }
-    func set(_ object: [String: Any], _ index: Int) -> [String: Any] {
-      var object = object
-      if index == segments.count - 1 {
-        object[segments[index]] = replacement
-      } else if let child = object[segments[index]] as? [String: Any] {
-        object[segments[index]] = set(child, index + 1)
-      }
-      return object
-    }
-    copy = set(copy, 0)
-    return try JSONSchema(copy)
-  }
-
   /// Checks the *shape* of every keyword's value, not just its name.
   ///
   /// Allowlisting names alone is not enough. `"type": ["string", "null"]` is

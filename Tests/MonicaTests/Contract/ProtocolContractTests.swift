@@ -89,25 +89,14 @@ final class ProtocolContractTests: XCTestCase {
     for name in referenced { XCTAssertTrue(schema.definitionNames().contains(name), "#/$defs/\(name) is referenced but not defined") }
   }
 
-  /// DEC57 relaxes `platform` from a closed enum to a bounded string so a new
-  /// SDK can deliver before the server learns its name.
-  ///
-  /// Until MONICA ships and publishes that change, the vendored `envelope.json`
-  /// still enumerates `javascript | node | java | php` and this assertion
-  /// cannot hold. It is wrapped in `XCTExpectFailure` rather than left red,
-  /// because a red `swift test` also fails `release.yml`, which would make it
-  /// impossible to cut any release at all. `strict: false` means the test does
-  /// not start failing for the opposite reason once the relaxation is
-  /// vendored — but it does stop being reported as an expected failure, which
-  /// is the signal to delete this wrapper. Every other obligation is checked
-  /// meanwhile through `schemaForSDKOutput()`.
+  /// The published `platform` enum has to name `swift`, or ingest answers 422
+  /// to every event this SDK sends. DEC57 added it; this is what catches the
+  /// value being taken back out the next time the bundle is re-vendored.
   func testPlatformSwiftIsAcceptedByTheVendoredSchema() throws {
-    XCTExpectFailure("Accel-Hack/monica has not deployed the DEC57 platform relaxation yet", strict: false)
     let issues = bundle.schema.validate(Monica.platformName, at: "/$defs/errorItem/properties/platform")
     XCTAssertTrue(issues.isEmpty,
-                  "envelope.json rejects platform \"\(Monica.platformName)\": \(issues). Ingest would answer 422 to every"
-                    + " event this SDK sends. The relaxation (Accel-Hack/monica: platform as a non-empty string of at most"
-                    + " 64 characters) must be merged and deployed, then re-vendored with `python3 scripts/spec-sync.py`.")
+                  "envelope.json rejects platform \"\(Monica.platformName)\": \(issues). Ingest would answer 422 to"
+                    + " every event this SDK sends.")
   }
 
   func testTheErrorBodyShapeIsStillUsable() throws {
@@ -153,7 +142,7 @@ final class ProtocolContractTests: XCTestCase {
   // MARK: 3. what this SDK puts on the wire
 
   func testEveryEnvelopeThisSDKEmitsSatisfiesTheSchemaAndThePayloadObligations() throws {
-    let schema = try schemaForSDKOutput()
+    let schema = bundle.schema
     for (label, envelope) in try sdkEnvelopes() {
       let issues = schema.validate(envelope)
       XCTAssertTrue(issues.isEmpty, "\(label): \(issues)")
@@ -244,7 +233,7 @@ final class ProtocolContractTests: XCTestCase {
   }
 
   func testTheCrashFromAPreviousLaunchMeetsTheSameContract() throws {
-    let schema = try schemaForSDKOutput()
+    let schema = bundle.schema
     for (label, envelope) in try sdkEnvelopes() where label.hasPrefix("a crash") {
       XCTAssertEqual(schema.validate(envelope), [], label)
       let item = try XCTUnwrap(((envelope as? [String: Any])?["items"] as? [[String: Any]])?.first)
@@ -256,7 +245,7 @@ final class ProtocolContractTests: XCTestCase {
   }
 
   func testABatchLargerThanThePublishedLimitIsSplitAndOverflowIsReported() throws {
-    let schema = try schemaForSDKOutput()
+    let schema = bundle.schema
     let envelopes = try sdkEnvelopes()
     let split = envelopes.keys.filter { $0.hasPrefix("an overflowing batch") }.sorted()
     XCTAssertEqual(split.count, 2, "150 queued events must leave as two envelopes")
@@ -386,7 +375,7 @@ final class ProtocolContractTests: XCTestCase {
     XCTAssertLessThanOrEqual(decoded.count, try XCTUnwrap(bundle.limits["envelope_decompressed_bytes"] as? Int))
     // One request carries one envelope: the body is a single JSON object.
     let json = try XCTUnwrap(JSONSerialization.jsonObject(with: decoded) as? [String: Any])
-    XCTAssertEqual(try schemaForSDKOutput().validate(json), [], "the gzipped request body")
+    XCTAssertEqual(bundle.schema.validate(json), [], "the gzipped request body")
   }
 
   func testStatusesAreHandledTheWayTransportJsonSays() throws {
@@ -428,7 +417,7 @@ final class ProtocolContractTests: XCTestCase {
   // MARK: 5. the validator has to be able to say no
 
   func testTheValidatorRejectsWhatItShould() throws {
-    let schema = try schemaForSDKOutput()
+    let schema = bundle.schema
     let baseline = try XCTUnwrap(try sdkEnvelopes()["messages at every level and an unhandled error"] as? [String: Any])
     XCTAssertEqual(schema.validate(baseline), [])
 
@@ -495,18 +484,6 @@ final class ProtocolContractTests: XCTestCase {
   }
 
   // MARK: helpers
-
-  /// `envelope.json` as this SDK must be checked against today: the vendored
-  /// copy, with `platform` relaxed to the bounded string DEC57 publishes, but
-  /// only while the copy still carries the closed enum. Once MONICA ships and
-  /// the bundle is re-vendored, the replacement is skipped and this is exactly
-  /// the published schema. `testPlatformSwiftIsAcceptedByTheVendoredSchema`
-  /// tracks that moment; this helper keeps every other obligation checked.
-  private func schemaForSDKOutput() throws -> JSONSchema {
-    let pointer = "/$defs/errorItem/properties/platform"
-    if bundle.schema.validate(Monica.platformName, at: pointer).isEmpty { return bundle.schema }
-    return try bundle.schema.replacing(pointer: pointer, with: ["type": "string", "minLength": 1, "maxLength": 64])
-  }
 
   private func authSchemes() throws -> [String: [String: Any]] {
     let list = try XCTUnwrap(bundle.transport["auth"] as? [[String: Any]])
