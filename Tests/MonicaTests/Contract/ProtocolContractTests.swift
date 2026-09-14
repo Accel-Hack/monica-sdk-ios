@@ -630,7 +630,14 @@ final class ProtocolContractTests: XCTestCase {
         options.maxQueueSize = 150
         options.batchSize = 500  // clamped to the published limit
       }
+      // The sender drains as soon as the queue reaches `batchSize`, so without
+      // the gate the 150th capture may race a drain that has already taken a
+      // partial batch, and the split would be whatever the machine's timing
+      // made of it. Held, the first drain leaves with the published limit and
+      // the rest follows in one envelope.
+      transport.hold()
       for index in 0..<150 { monica.captureMessage("m\(index)") }
+      transport.open()
       XCTAssertTrue(monica.flush(timeout: 10))
       monica.close()
       XCTAssertEqual(transport.envelopes.count, 2)

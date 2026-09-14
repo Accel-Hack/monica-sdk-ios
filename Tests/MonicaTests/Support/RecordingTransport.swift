@@ -6,8 +6,27 @@ final class RecordingTransport: MonicaTransport {
   private let lock = NSLock()
   private(set) var envelopes: [MonicaEnvelope] = []
   var accept = true
+  private var gate: DispatchSemaphore?
+
+  /// Holds the first send until ``open()``, and lets every send through from
+  /// then on. Capturing and the sender queue run at the same time, so a test
+  /// that wants a known split has to keep the sender out of the way while it
+  /// fills the queue.
+  func hold() {
+    lock.lock(); defer { lock.unlock() }
+    gate = DispatchSemaphore(value: 0)
+  }
+
+  func open() {
+    lock.lock(); let gate = self.gate; lock.unlock()
+    gate?.signal()
+  }
 
   func send(_ envelope: MonicaEnvelope) throws -> Bool {
+    lock.lock(); let gate = self.gate; lock.unlock()
+    // A turnstile: the first sender through signals the next one, so the gate
+    // stays open once it has been opened.
+    if let gate { gate.wait(); gate.signal() }
     lock.lock(); defer { lock.unlock() }
     envelopes.append(envelope)
     return accept
