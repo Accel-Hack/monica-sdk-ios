@@ -239,7 +239,8 @@ python3 scripts/spec-sync.py --check-remote  # さらに配信元と一致する
 ### リリース
 
 1. `Sources/Monica/Monica.swift` の `sdkVersion` を上げて `main` へ merge する
-2. その commit に `X.Y.Z`（接頭辞なし）の tag を打って push する
+2. その commit に `vX.Y.Z` の tag を打って push する（他の MONICA SDK と接頭辞を揃える。
+   利用者が `Package.swift` に書く `from:` は `v` を外した `X.Y.Z`）
 
 `release.yml` が tag と `sdkVersion` の一致、`spec-sync.py --check`、`swift test`、iOS 向け compile を確かめてから
 GitHub Release を作る。
