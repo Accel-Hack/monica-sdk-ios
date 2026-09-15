@@ -1,15 +1,12 @@
 name: release
 
-# SwiftPM の publish は git tag そのもの。利用者は
-# `.package(url: "https://github.com/Accel-Hack/monica-sdk-ios", from: "X.Y.Z")` で
-# tag を解決するので、registry へ上げる工程は無い。この workflow がやるのは
+# この workflow がやるのは
 #
 #   1. tag が main 上にあり、`Monica.sdkVersion`（envelope の sdk.version）と一致すること
 #   2. その commit で `swift test` と iOS 向け compile が通ること
-#   3. GitHub Release を作り、tag を「出荷した版」として人が読める形で残すこと
+#   3. GitHub Release を作り、tag を「publishした版」として人が読める形で残すこと
 #
-# 一致しない tag を弾くのは、SDK が名乗る版と利用者が入れた版がずれると、取り込み状況の
-# 集計（sdk.name / sdk.version 単位）が嘘になるため。tag は `vX.Y.Z` で、他の MONICA SDK
+# tag は `vX.Y.Z` で、他の MONICA SDK
 # （android / js / php など）と接頭辞を揃える。SwiftPM は `v` を外して semver として解決
 # するので、利用者が書く `from:` は接頭辞なしのままで良い。
 
