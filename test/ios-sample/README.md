@@ -23,7 +23,7 @@ signal handler が本物のクラッシュで動くこと、次回起動で fata
 | Xcode | 26.x（確認したのは 26.6） | `swift test` と iOS simulator SDK。`xcode-select` が Command Line Tools を指しているなら `DEVELOPER_DIR` で指定する |
 | iOS runtime | Xcode > Settings > Components か `xcodebuild -downloadPlatform iOS` | Xcode 本体には同梱されない |
 | XcodeGen | `brew install xcodegen` | `.xcodeproj` をコミットしないため。`project.yml` が正 |
-| deployment target | **13.0** | SDK の下限。ここで動くことを確かめたいので上げない |
+| deployment target | **15.0** | SDK の下限。ここで動くことを確かめたいので上げない |
 | SDK の参照 | `path: ../..`（この repository の root） | 手元の変更をそのまま試すため。公開版を試すなら URL 参照に書き換える |
 
 ```bash
