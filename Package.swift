@@ -1,7 +1,7 @@
 // swift-tools-version:5.9
 import PackageDescription
 
-// iOS 13 / Swift 5 language mode: the applications this ships to first are
+// iOS 15 / Swift 5 language mode: the applications this ships to first are
 // pinned there, and nothing in the SDK needs newer APIs. macOS is listed only so
 // `swift test` can run on a Mac without a simulator.
 //
@@ -13,7 +13,7 @@ import PackageDescription
 //   .product(name: "Monica", package: "monica-sdk-ios")
 let package = Package(
   name: "monica-swift",
-  platforms: [.iOS(.v13), .macOS(.v10_15)],
+  platforms: [.iOS(.v15), .macOS(.v12)],
   products: [
     .library(name: "Monica", targets: ["Monica"]),
   ],

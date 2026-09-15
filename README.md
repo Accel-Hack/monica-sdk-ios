@@ -7,8 +7,8 @@ Swift Package Manager だけで配る（library product は `Monica`）。
 
 | | |
 | --- | --- |
-| iOS | 13.0 以上 |
-| macOS | 10.15 以上 |
+| iOS | 15.0 以上 |
+| macOS | 12.0 以上 |
 | Swift tools | 5.9 以上（Swift 5 language mode） |
 
 CocoaPods / Carthage は用意しない。公開 API に `async/await` は出していない。
@@ -219,8 +219,8 @@ iOS 向けにコンパイルできることは CI と同じコマンドで見る
 ```bash
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 swift build --scratch-path .build-ios \
-  -Xswiftc -sdk -Xswiftc "$SDK" -Xswiftc -target -Xswiftc arm64-apple-ios13.0-simulator \
-  -Xcc -isysroot -Xcc "$SDK" -Xcc -target -Xcc arm64-apple-ios13.0-simulator
+  -Xswiftc -sdk -Xswiftc "$SDK" -Xswiftc -target -Xswiftc arm64-apple-ios15.0-simulator \
+  -Xcc -isysroot -Xcc "$SDK" -Xcc -target -Xcc arm64-apple-ios15.0-simulator
 ```
 
 ### 公開契約（spec/）
