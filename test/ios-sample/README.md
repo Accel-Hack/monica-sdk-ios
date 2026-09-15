@@ -99,10 +99,6 @@ python3 test/ios-sample/tools/stub-ingest.py &                           # 127.0
 xcodebuild ... MONICA_DSN='http://mpk_local@localhost:8787/sample' build   # SDK は localhost だけ平文 http を許す
 ```
 
-MONICA 側で `platform` の値検証を外す変更が配信されるまでは、stg の ingest は `platform: swift` を
-422 で弾く。stand-in は契約テストと同じく、vendoring した schema がまだ `swift` を弾く間だけ
-その緩和を当てて受理する（起動時にその旨を出す。`--strict` で止められる）。
-
 ## 5. strip されたビルドで何が起きるか
 
 Release + `DEPLOYMENT_POSTPROCESSING=YES`（archive と同じ条件）で組むと symbol が strip され、
