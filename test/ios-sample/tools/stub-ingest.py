@@ -13,10 +13,6 @@ SDK は localhost / 127.0.0.1 に限って平文 http を許すので、DSN を
 検証は契約テスト（Tests/MonicaTests/Contract/JSONSchema.swift）と同じ部分集合の
 JSON Schema draft 2020-12 で行い、未対応の keyword が schema に現れたら黙って通さず
 起動時に止まる。Python 3 標準ライブラリだけで動く。
-
-`platform` だけは契約テストと同じ扱いをする: vendoring した schema がまだ閉じた enum で
-`swift` を弾くなら、MONICA 側で配信予定の緩和（空でない 64 文字以内の文字列）を当てて
-受理する。緩和が配信されて取り込み直せば何もしない。`--strict` でこの扱いを止められる。
 """
 
 import argparse
@@ -215,14 +211,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--record", help="受理した item を 1 行 1 JSON で追記するファイル")
-    parser.add_argument("--strict", action="store_true", help="platform の緩和を当てず、vendoring した schema をそのまま使う")
     arguments = parser.parse_args()
     with open(SCHEMA_PATH, "r", encoding="utf-8") as handle:
         root = json.load(handle)
-    platform = root["$defs"]["errorItem"]["properties"]["platform"]
-    if not arguments.strict and "swift" not in platform.get("enum", ["swift"]):
-        root["$defs"]["errorItem"]["properties"]["platform"] = {"type": "string", "minLength": 1, "maxLength": 64}
-        print("stub-ingest: vendoring した schema は platform \"swift\" を弾くので、配信予定の緩和を当てて受理する（--strict で止める）", flush=True)
     schema = Schema(root)
     record = open(arguments.record, "a", encoding="utf-8") if arguments.record else None
     server = ThreadingHTTPServer(("127.0.0.1", arguments.port), make_handler(schema, record))
