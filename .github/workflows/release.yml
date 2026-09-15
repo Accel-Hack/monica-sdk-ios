@@ -9,14 +9,14 @@ name: release
 #   3. GitHub Release を作り、tag を「出荷した版」として人が読める形で残すこと
 #
 # 一致しない tag を弾くのは、SDK が名乗る版と利用者が入れた版がずれると、取り込み状況の
-# 集計（sdk.name / sdk.version 単位）が嘘になるため。tag は `X.Y.Z`（接頭辞なし）。
-# SwiftPM は `v` 付きも解決するが、1 repository = 1 package なので接頭辞で区別する
-# 必要が無い。
+# 集計（sdk.name / sdk.version 単位）が嘘になるため。tag は `vX.Y.Z` で、他の MONICA SDK
+# （android / js / php など）と接頭辞を揃える。SwiftPM は `v` を外して semver として解決
+# するので、利用者が書く `from:` は接頭辞なしのままで良い。
 
 on:
   push:
     tags:
-      - "[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   contents: write
@@ -41,7 +41,7 @@ jobs:
             exit 1
           fi
           VERSION=$(sed -n 's/.*public static let sdkVersion = "\([^"]*\)".*/\1/p' Sources/Monica/Monica.swift)
-          if [ "${TAG}" != "${VERSION}" ]; then
+          if [ "${TAG#v}" != "${VERSION}" ]; then
             echo "::error::tag ${TAG} と Monica.sdkVersion ${VERSION} が一致しません。Sources/Monica/Monica.swift を直してから tag を打ち直してください"
             exit 1
           fi
