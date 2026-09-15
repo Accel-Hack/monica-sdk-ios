@@ -19,7 +19,7 @@ public final class Monica {
   public static let sdkName = "monica-swift"
   /// `sdk.version`: the git tag a release is cut from. `release.yml` refuses a
   /// tag that does not match this value.
-  public static let sdkVersion = "0.1.0"
+  public static let sdkVersion = "0.2.0"
   /// `platform` on every event. `swift` names the language, as the other
   /// values do; the OS is in `contexts.os`.
   public static let platformName = "swift"
