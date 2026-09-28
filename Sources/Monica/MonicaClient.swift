@@ -14,7 +14,9 @@ public final class MonicaClient {
   static let presenceSampleRate = 1.0
   static let presenceMinSampleRate = 0.01
   /// The `UserDefaults` keys of the presence check. README lists them.
-  static let lastAcceptedAtKey = "com.accelhack.monica.presence.lastAcceptedAt"
+  /// When the current interval started: the last `202`, or the last heartbeat
+  /// this device decided on, sent or sampled out.
+  static let intervalStartedAtKey = "com.accelhack.monica.presence.intervalStartedAt"
   static let presenceIntervalKey = "com.accelhack.monica.presence.intervalMs"
   static let presenceSampleRateKey = "com.accelhack.monica.presence.sampleRate"
 
@@ -25,9 +27,6 @@ public final class MonicaClient {
   private let sender = DispatchQueue(label: "monica-swift-sender")
   private let timer: DispatchSourceTimer
   private let defaults: UserDefaults
-  /// Sender queue only. A heartbeat that failed or was sampled out waits for
-  /// the next interval instead of going out again on every tick.
-  private var lastHeartbeatAttempt: Date?
   private let lock = NSLock()
   private var queue: [MonicaEvent] = []
   private var discarded = 0
@@ -240,20 +239,19 @@ public final class MonicaClient {
     sender.async { [weak self] in self?.sendHeartbeatIfDue("start") }
   }
 
-  /// A `client_report` in an envelope of its own, when no envelope has been
-  /// accepted for an interval. Runs on the sender queue.
+  /// A `client_report` in an envelope of its own, when the current interval
+  /// has run out. Deciding starts the next interval, so a report that fails or
+  /// is sampled out is not retried (or redrawn, even after a relaunch) until
+  /// then. Runs on the sender queue.
   private func sendHeartbeatIfDue(_ trigger: String) {
     let now = self.now()
-    let interval = presenceInterval
-    func due(_ since: Date?) -> Bool {
-      guard let since = since else { return true }
-      let elapsed = now.timeIntervalSince(since)
+    if isClosed || queued > 0 { return }
+    if let started = defaults.object(forKey: Self.intervalStartedAtKey) as? Date {
+      let elapsed = now.timeIntervalSince(started)
       // A clock set back must not silence the device until it catches up.
-      return elapsed < 0 || elapsed >= interval
+      if elapsed >= 0 && elapsed < presenceInterval { return }
     }
-    if isClosed || queued > 0 || !due(defaults.object(forKey: Self.lastAcceptedAtKey) as? Date)
-      || !due(lastHeartbeatAttempt) { return }
-    lastHeartbeatAttempt = now
+    defaults.set(now, forKey: Self.intervalStartedAtKey)
     if random() >= presenceSampleRate { return }
     let item = MonicaEvent([
       "type": "client_report",
@@ -297,10 +295,11 @@ public final class MonicaClient {
     // and the 422 issues, and it falls back to `send` for a transport that
     // does not implement it.
     guard let result = try? transport.deliver(envelope), result.accepted else { return false }
-    defaults.set(now(), forKey: Self.lastAcceptedAtKey)
-    // `Int` takes digits only, so a fraction or an exponent fails here; `Double`
-    // takes both, hence the pattern for the rate.
-    if let millis = result.presenceIntervalMs.flatMap({ Int($0) }), millis >= Self.presenceMinIntervalMillis {
+    defaults.set(now(), forKey: Self.intervalStartedAtKey)
+    // Plain decimals only: `Int` and `Double` would also take a sign, and
+    // `Double` an exponent.
+    if let value = result.presenceIntervalMs, value.range(of: "^[0-9]+$", options: .regularExpression) != nil,
+       let millis = Int(value), millis >= Self.presenceMinIntervalMillis {
       defaults.set(millis, forKey: Self.presenceIntervalKey)
     }
     if let value = result.presenceSampleRate,

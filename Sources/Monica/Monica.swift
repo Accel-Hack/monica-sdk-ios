@@ -107,8 +107,9 @@ public final class Monica {
     monica.persistSession()
     client.checkPresence()
     // Subscribed even without `trackAppLifecycle`: the return to the
-    // foreground is when a mobile app checks its presence.
-    let recordsLifecycle = options.trackAppLifecycle
+    // foreground is when a mobile app checks its presence. macOS activation
+    // only drives that check and is not recorded.
+    let recordsLifecycle = options.trackAppLifecycle && !(platform is FoundationPlatform)
     monica.lifecycle = platform.trackLifecycle { [weak monica] transition in
       monica?.onLifecycle(transition, recordsBreadcrumb: recordsLifecycle)
     }

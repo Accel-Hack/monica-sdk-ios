@@ -110,7 +110,7 @@ final class PresenceTests: XCTestCase {
     XCTAssertEqual(platform.defaults.double(forKey: MonicaClient.presenceSampleRateKey), 0.4)
 
     // Malformed headers are ignored one by one; missing ones keep what is stored.
-    for (intervalMs, rate) in [("1e5", "5e-1"), ("59999", "0.001"), ("120000.5", "1.5"), ("abc", "-0.5"),
+    for (intervalMs, rate) in [("1e5", "5e-1"), ("+180000", "+0.5"), ("59999", "0.001"), ("120000.5", "1.5"), ("abc", "-0.5"),
                                ("", "")] {
       transport.presenceIntervalMs = intervalMs
       transport.presenceSampleRate = rate
@@ -154,11 +154,31 @@ final class PresenceTests: XCTestCase {
     XCTAssertTrue(relaunched.flush(timeout: 2))
     XCTAssertEqual(reports(transport), ["start"], "UserDefaults remembers the 202 across launches")
 
-    platform.defaults.set(Date() - interval - 1, forKey: MonicaClient.lastAcceptedAtKey)
+    platform.defaults.set(Date() - interval - 1, forKey: MonicaClient.intervalStartedAtKey)
     platform.emit("foreground")
     XCTAssertTrue(relaunched.flush(timeout: 2))
     XCTAssertEqual(reports(transport), ["start", "start"], "the foreground check is a start report")
     XCTAssertTrue(platform.tracking, "subscribed although trackAppLifecycle is false")
     XCTAssertTrue(relaunched.scope.snapshot().breadcrumbs.isEmpty, "trackAppLifecycle still decides the breadcrumbs")
+  }
+
+  func testAnActiveTransitionAloneRunsTheStartCheck() throws {
+    let transport = RecordingTransport()
+    let platform = FakePlatform()
+    let monica = try install(transport, platform)
+    XCTAssertEqual(reports(transport), [])
+    platform.defaults.set(Date() - interval - 1, forKey: MonicaClient.intervalStartedAtKey)
+    platform.emit("active")
+    XCTAssertTrue(monica.flush(timeout: 2))
+    XCTAssertEqual(reports(transport), ["start"])
+  }
+
+  func testTheFoundationPlatformReportsAppKitActivationWithoutLinkingAppKit() {
+    var transitions: [String] = []
+    let subscription = FoundationPlatform().trackLifecycle { transitions.append($0) }
+    NotificationCenter.default.post(name: Notification.Name("NSApplicationDidBecomeActiveNotification"), object: nil)
+    subscription.cancel()
+    NotificationCenter.default.post(name: Notification.Name("NSApplicationDidBecomeActiveNotification"), object: nil)
+    XCTAssertEqual(transitions, ["active"])
   }
 }

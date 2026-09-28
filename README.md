@@ -112,11 +112,11 @@ monica.close()                    // flush して crash handler と observer を
 稼働確認の `client_report` を単独の envelope で送る。起動し続けているアプリでは `flushInterval` の tick でも同じ判定をする。
 設定項目は無く、間隔と間引き率は MONICA 側の project 設定で変わる。
 
-前回受理された時刻と MONICA から受け取った設定は `UserDefaults.standard` の次のキーに保存する。
+間隔を数え始めた時刻と MONICA から受け取った設定は `UserDefaults.standard` の次のキーに保存する。
 
 | キー | 値 |
 | --- | --- |
-| `com.accelhack.monica.presence.lastAcceptedAt` | 最後に envelope が受理された時刻（`Date`） |
+| `com.accelhack.monica.presence.intervalStartedAt` | 間隔を数え始めた時刻（`Date`）。envelope が受理されたときと、稼働確認を送る（または間引く）と決めたときに書く |
 | `com.accelhack.monica.presence.intervalMs` | 間隔（ミリ秒） |
 | `com.accelhack.monica.presence.sampleRate` | 間引き率（0.01〜1） |
 
@@ -183,10 +183,11 @@ options.beforeSend = { event, hint in
 | `contexts.app` | `app_identifier`（bundle identifier）、`app_version`（`CFBundleShortVersionString`）、`app_build`（`CFBundleVersion`） |
 
 `trackAppLifecycle` が true のとき、`active` / `inactive` / `background` / `foreground` / `memory_warning` の遷移を
-category `app.lifecycle` の breadcrumb に残す（UIKit のあるプラットフォーム。macOS では `active` だけ）。
+category `app.lifecycle` の breadcrumb に残す（UIKit のあるプラットフォームだけ。macOS では記録しない）。
 
 `identifierForVendor`、端末名、広告 ID、アカウント、位置情報は**一切読まない**。パーミッションを要求する API も呼ばない。
 利用者を指す値は `setUser()` と `beforeSend` で明示したものだけが送られる。
+privacy manifest（`PrivacyInfo.xcprivacy`）を同梱し、UserDefaults の利用理由を `CA92.1` で申告している。
 
 ## 送信結果と診断
 
