@@ -114,6 +114,19 @@ final class URLSessionTransportTests: XCTestCase {
     XCTAssertEqual((json?["items"] as? [[String: Any]])?.first?["message"] as? String, "boom")
   }
 
+  func testAnAcceptedResponseHandsOverThePresenceHeaders() throws {
+    StubProtocol.reset([.init(status: 202, headers: ["x-monica-presence-interval-ms": "120000",
+                                                     "X-Monica-Presence-Sample-Rate": "0.5"]),
+                        .init(status: 202)])
+    let transport = try transport()
+    let withHeaders = try transport.deliver(envelope())
+    XCTAssertEqual(withHeaders.presenceIntervalMs, "120000", "header names are case-insensitive")
+    XCTAssertEqual(withHeaders.presenceSampleRate, "0.5")
+    let without = try transport.deliver(envelope())
+    XCTAssertNil(without.presenceIntervalMs)
+    XCTAssertNil(without.presenceSampleRate)
+  }
+
   func testDoesNotRetryAClientError() throws {
     StubProtocol.reset([.init(status: 422)])
     XCTAssertFalse(try transport().send(envelope()))

@@ -8,6 +8,15 @@ public final class MonicaClient {
   static let maxSafeEnvelopeJSONBytes = 1_000_000
   private static let senderKey = DispatchSpecificKey<Bool>()
   private static let inBeforeSendKey = "com.accelhack.monica.inBeforeSend"
+  // transport.json `presence`. The contract test compares each with the vendored copy.
+  static let presenceIntervalMillis = 86_400_000
+  static let presenceMinIntervalMillis = 60_000
+  static let presenceSampleRate = 1.0
+  static let presenceMinSampleRate = 0.01
+  /// The `UserDefaults` keys of the presence check. README lists them.
+  static let lastAcceptedAtKey = "com.accelhack.monica.presence.lastAcceptedAt"
+  static let presenceIntervalKey = "com.accelhack.monica.presence.intervalMs"
+  static let presenceSampleRateKey = "com.accelhack.monica.presence.sampleRate"
 
   private let options: ValidatedOptions
   private let transport: MonicaTransport
@@ -15,6 +24,10 @@ public final class MonicaClient {
   private let release: String?
   private let sender = DispatchQueue(label: "monica-swift-sender")
   private let timer: DispatchSourceTimer
+  private let defaults: UserDefaults
+  /// Sender queue only. A heartbeat that failed or was sampled out waits for
+  /// the next interval instead of going out again on every tick.
+  private var lastHeartbeatAttempt: Date?
   private let lock = NSLock()
   private var queue: [MonicaEvent] = []
   private var discarded = 0
@@ -23,8 +36,10 @@ public final class MonicaClient {
   var now: () -> Date = { Date() }
   var random: () -> Double = { Double.random(in: 0..<1) }
 
-  init(options: ValidatedOptions, transport: MonicaTransport, inAppModules: [String], release: String?) {
+  init(options: ValidatedOptions, transport: MonicaTransport, inAppModules: [String], release: String?,
+       defaults: UserDefaults = .standard) {
     self.options = options
+    self.defaults = defaults
     self.transport = transport
     self.inAppModules = inAppModules
     self.release = release
@@ -33,7 +48,7 @@ public final class MonicaClient {
     timer = DispatchSource.makeTimerSource(queue: sender)
     let interval = options.options.flushInterval
     timer.schedule(deadline: .now() + interval, repeating: interval)
-    timer.setEventHandler { [weak self] in self?.drainBestEffort() }
+    timer.setEventHandler { [weak self] in self?.tick() }
     timer.resume()
   }
 
@@ -214,6 +229,88 @@ public final class MonicaClient {
     _ = drainOnce()
   }
 
+  /// The flush timer. An empty queue is the only time a heartbeat is needed:
+  /// queued events refresh the presence themselves when they are accepted.
+  func tick() {
+    if queued > 0 { drainBestEffort() } else { sendHeartbeatIfDue("interval") }
+  }
+
+  /// Launch and return to the foreground.
+  func checkPresence() {
+    sender.async { [weak self] in self?.sendHeartbeatIfDue("start") }
+  }
+
+  /// A `client_report` in an envelope of its own, when no envelope has been
+  /// accepted for an interval. Runs on the sender queue.
+  private func sendHeartbeatIfDue(_ trigger: String) {
+    let now = self.now()
+    let interval = presenceInterval
+    func due(_ since: Date?) -> Bool {
+      guard let since = since else { return true }
+      let elapsed = now.timeIntervalSince(since)
+      // A clock set back must not silence the device until it catches up.
+      return elapsed < 0 || elapsed >= interval
+    }
+    if isClosed || queued > 0 || !due(defaults.object(forKey: Self.lastAcceptedAtKey) as? Date)
+      || !due(lastHeartbeatAttempt) { return }
+    lastHeartbeatAttempt = now
+    if random() >= presenceSampleRate { return }
+    let item = MonicaEvent([
+      "type": "client_report",
+      "timestamp": Timestamps.iso8601(now),
+      "platform": Monica.platformName,
+      "environment": options.environment,
+      "trigger": trigger,
+    ])
+    if let release = release { item["release"] = release }
+    lock.lock()
+    let pendingDiscarded = discarded
+    discarded = 0
+    lock.unlock()
+    let envelope = MonicaEnvelope(sdkName: Monica.sdkName, sdkVersion: Monica.sdkVersion,
+                                  sentAt: Timestamps.iso8601(now), discarded: pendingDiscarded, items: [item])
+    if !deliver(envelope) {
+      lock.lock()
+      discarded += pendingDiscarded
+      lock.unlock()
+    }
+  }
+
+  private var presenceInterval: TimeInterval {
+    let stored = defaults.integer(forKey: Self.presenceIntervalKey)
+    let millis = stored >= Self.presenceMinIntervalMillis ? stored : Self.presenceIntervalMillis
+    return TimeInterval(millis) / 1_000
+  }
+
+  private var presenceSampleRate: Double {
+    guard let stored = defaults.object(forKey: Self.presenceSampleRateKey) as? Double,
+          (Self.presenceMinSampleRate...1).contains(stored) else { return Self.presenceSampleRate }
+    return stored
+  }
+
+  /// Every envelope goes through here, so this is the one place an accepted
+  /// response moves the presence deadline and hands over MONICA's presence
+  /// settings. A header that is absent keeps the stored value; one that is
+  /// malformed is ignored on its own.
+  private func deliver(_ envelope: MonicaEnvelope) -> Bool {
+    // `deliver` rather than `send`: it is the path that carries the status
+    // and the 422 issues, and it falls back to `send` for a transport that
+    // does not implement it.
+    guard let result = try? transport.deliver(envelope), result.accepted else { return false }
+    defaults.set(now(), forKey: Self.lastAcceptedAtKey)
+    // `Int` takes digits only, so a fraction or an exponent fails here; `Double`
+    // takes both, hence the pattern for the rate.
+    if let millis = result.presenceIntervalMs.flatMap({ Int($0) }), millis >= Self.presenceMinIntervalMillis {
+      defaults.set(millis, forKey: Self.presenceIntervalKey)
+    }
+    if let value = result.presenceSampleRate,
+       value.range(of: "^[0-9]+(\\.[0-9]+)?$", options: .regularExpression) != nil,
+       let rate = Double(value), (Self.presenceMinSampleRate...1).contains(rate) {
+      defaults.set(rate, forKey: Self.presenceSampleRateKey)
+    }
+    return true
+  }
+
   private func drainOnce() -> Bool {
     var batch: [MonicaEvent] = []
     var pendingDiscarded = 0
@@ -238,11 +335,7 @@ public final class MonicaClient {
       }
       let envelope = MonicaEnvelope(sdkName: Monica.sdkName, sdkVersion: Monica.sdkVersion, sentAt: sentAt,
                                     discarded: pendingDiscarded, items: Array(batch.prefix(fitting)))
-      // `deliver` rather than `send`: it is the path that carries the status
-      // and the 422 issues, and it falls back to `send` for a transport that
-      // does not implement it.
-      let accepted = (try? transport.deliver(envelope))?.accepted ?? false
-      if !accepted {
+      if !deliver(envelope) {
         lock.lock()
         discarded += pendingDiscarded + batch.count
         lock.unlock()

@@ -270,7 +270,7 @@ final class ProtocolContractTests: XCTestCase {
     // transport.json is the machine-readable copy of the tables in ingest.md.
     // Pinning the vocabulary turns "MONICA grew an obligation the Swift SDK
     // ignores" into a failing test.
-    XCTAssertEqual(bundle.transport.keys.sorted(), ["auth", "dsn", "endpoint", "retry", "status"],
+    XCTAssertEqual(bundle.transport.keys.sorted(), ["auth", "dsn", "endpoint", "presence", "retry", "status"],
                    "transport.json declares sections this SDK has not considered (see README for what is unimplemented)")
     let status = try XCTUnwrap(bundle.transport["status"] as? [String: String])
     XCTAssertEqual(status.keys.sorted(), ["202", "400", "401", "413", "422", "429", "5xx"], "the status vocabulary changed")
@@ -295,6 +295,17 @@ final class ProtocolContractTests: XCTestCase {
     XCTAssertEqual(endpoint["path"] as? String, URLSessionTransport.ingestPath)
     XCTAssertEqual(endpoint["content_type"] as? String, URLSessionTransport.contentType)
     XCTAssertEqual(endpoint["content_encoding"] as? String, URLSessionTransport.contentEncoding)
+  }
+
+  func testThePresenceConstantsMatchTransportJson() throws {
+    let presence = try XCTUnwrap(bundle.transport["presence"] as? [String: Any])
+    XCTAssertEqual(presence["interval_ms"] as? Int, MonicaClient.presenceIntervalMillis)
+    XCTAssertEqual(presence["min_interval_ms"] as? Int, MonicaClient.presenceMinIntervalMillis)
+    XCTAssertEqual(presence["sample_rate"] as? Double, MonicaClient.presenceSampleRate)
+    XCTAssertEqual(presence["min_sample_rate"] as? Double, MonicaClient.presenceMinSampleRate)
+    let headers = try XCTUnwrap(presence["override_headers"] as? [String: String])
+    XCTAssertEqual(headers, ["interval_ms": URLSessionTransport.presenceIntervalHeader,
+                             "sample_rate": URLSessionTransport.presenceSampleRateHeader])
   }
 
   func testTheRetryPolicyMatchesTransportJson() throws {
@@ -526,14 +537,22 @@ final class ProtocolContractTests: XCTestCase {
     func record(_ label: String, _ envelope: MonicaEnvelope) throws {
       result[label] = try JSONSerialization.jsonObject(with: envelope.jsonData())
     }
-    func install(_ configure: (inout MonicaOptions) -> Void = { _ in }) throws -> (Monica, RecordingTransport) {
+    func install(platform: FakePlatform = FakePlatform(),
+                 _ configure: (inout MonicaOptions) -> Void = { _ in }) throws -> (Monica, RecordingTransport) {
       let transport = RecordingTransport()
       var options = TestSupport.options(transport: transport, directory: directory)
       options.environment = "production"
       options.inAppModules = [TestSupport.testImageName]
       options.flushInterval = 60
       configure(&options)
-      return (try Monica.install(options, platform: FakePlatform()), transport)
+      return (try Monica.install(options, platform: platform), transport)
+    }
+
+    do {
+      let (monica, transport) = try install(platform: FakePlatform().forgetPresence())
+      XCTAssertTrue(monica.flush(timeout: 5))
+      monica.close()
+      try record("the start client_report", try XCTUnwrap(transport.envelopes.first))
     }
 
     do {
@@ -661,7 +680,8 @@ final class ProtocolContractTests: XCTestCase {
     if let discarded = envelope["discarded"] as? NSNumber, discarded.int64Value > Self.maxSafeInteger || discarded.doubleValue > Double(Self.maxSafeInteger) {
       issues.append("discarded \(discarded) is not a safe integer")
     }
-    for item in (envelope["items"] as? [[String: Any]]) ?? [] where item["type"] as? String == "error" {
+    for item in (envelope["items"] as? [[String: Any]]) ?? []
+    where ["error", "client_report"].contains(item["type"] as? String) {
       if let timestamp = item["timestamp"] as? String, !Self.isCalendarRFC3339(timestamp) { issues.append("timestamp \(timestamp)") }
       for crumb in (item["breadcrumbs"] as? [[String: Any]]) ?? [] {
         if let timestamp = crumb["timestamp"] as? String, !Self.isCalendarRFC3339(timestamp) { issues.append("breadcrumb timestamp \(timestamp)") }

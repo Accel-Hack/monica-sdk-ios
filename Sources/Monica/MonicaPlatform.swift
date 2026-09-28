@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(AppKit) && os(macOS)
+import AppKit
+#endif
 
 /// Stops a lifecycle subscription.
 public protocol MonicaCancellable {
@@ -14,6 +17,12 @@ public protocol MonicaPlatform {
   /// Starts reporting app lifecycle transitions (`active`, `inactive`,
   /// `background`, `foreground`, `memory_warning`).
   func trackLifecycle(_ listener: @escaping (String) -> Void) -> MonicaCancellable
+  /// Where the presence check keeps its state across launches.
+  var defaults: UserDefaults { get }
+}
+
+public extension MonicaPlatform {
+  var defaults: UserDefaults { .standard }
 }
 
 final class ClosureCancellable: MonicaCancellable {
@@ -25,11 +34,19 @@ final class ClosureCancellable: MonicaCancellable {
   }
 }
 
-/// The platform for any process: environment only, no lifecycle events.
+/// The platform for any process: environment only, and on macOS the `active`
+/// transition of an AppKit application (never posted in a command-line tool).
 struct FoundationPlatform: MonicaPlatform {
   var environment: AppleEnvironment? { AppleEnvironment.current() }
   func trackLifecycle(_ listener: @escaping (String) -> Void) -> MonicaCancellable {
-    ClosureCancellable {}
+    #if canImport(AppKit) && os(macOS)
+    let center = NotificationCenter.default
+    let observer = center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
+                                      queue: nil) { _ in listener("active") }
+    return ClosureCancellable { center.removeObserver(observer) }
+    #else
+    return ClosureCancellable {}
+    #endif
   }
 }
 

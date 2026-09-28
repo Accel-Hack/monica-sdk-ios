@@ -82,7 +82,8 @@ public final class Monica {
       ?? URLSessionTransport(dsn: validated.dsn, maxRetries: options.maxRetries,
                              requestTimeout: options.requestTimeout, configuration: .ephemeral,
                              onDiagnostic: options.onDiagnostic)
-    let client = MonicaClient(options: validated, transport: transport, inAppModules: inAppModules, release: release)
+    let client = MonicaClient(options: validated, transport: transport, inAppModules: inAppModules, release: release,
+                              defaults: platform.defaults)
     if options.attachDeviceContext, let environment = environment {
       environment.apply(to: client.globalScope)
     }
@@ -104,10 +105,12 @@ public final class Monica {
     // `beforeSend`, which may itself call back into `Monica.current`.
     monica.sendPendingCrashReport()
     monica.persistSession()
-    if options.trackAppLifecycle {
-      monica.lifecycle = platform.trackLifecycle { [weak monica] transition in
-        monica?.onLifecycle(transition)
-      }
+    client.checkPresence()
+    // Subscribed even without `trackAppLifecycle`: the return to the
+    // foreground is when a mobile app checks its presence.
+    let recordsLifecycle = options.trackAppLifecycle
+    monica.lifecycle = platform.trackLifecycle { [weak monica] transition in
+      monica?.onLifecycle(transition, recordsBreadcrumb: recordsLifecycle)
     }
     return monica
   }
@@ -194,9 +197,12 @@ public final class Monica {
     return closed
   }
 
-  private func onLifecycle(_ transition: String) {
+  private func onLifecycle(_ transition: String, recordsBreadcrumb: Bool) {
     if isClosed { return }
-    client.globalScope.addBreadcrumb(category: "app.lifecycle", message: transition)
+    // `active` is the only transition macOS reports; on iOS it follows
+    // `foreground`, and the second check finds the first one's answer.
+    if transition == "foreground" || transition == "active" { client.checkPresence() }
+    if recordsBreadcrumb { client.globalScope.addBreadcrumb(category: "app.lifecycle", message: transition) }
   }
 
   private func sendPendingCrashReport() {

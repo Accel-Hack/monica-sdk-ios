@@ -43,6 +43,8 @@ public final class URLSessionTransport: NSObject, MonicaTransport {
   static let contentType = "application/json"
   static let contentEncoding = "gzip"
   static let publicKeyHeader = "X-Monica-Key"
+  static let presenceIntervalHeader = "X-Monica-Presence-Interval-Ms"
+  static let presenceSampleRateHeader = "X-Monica-Presence-Sample-Rate"
   static let maxRetryAfterSeconds: TimeInterval = 60
   static let backoffBaseMillis = 1_000
   static let backoffFactor = 2
@@ -140,8 +142,14 @@ public final class URLSessionTransport: NSObject, MonicaTransport {
       // `close()` can land between two attempts, on another thread.
       if isStopped { return MonicaTransportResult(accepted: false, stopped: true) }
       switch perform(body) {
-      case .status(let status, let retryAfter, let responseBody):
-        if (200..<300).contains(status) { return MonicaTransportResult(accepted: true, status: status) }
+      case .status(let status, let headers, let responseBody):
+        if (200..<300).contains(status) {
+          return MonicaTransportResult(
+            accepted: true, status: status,
+            presenceIntervalMs: headers.value(forHTTPHeaderField: Self.presenceIntervalHeader),
+            presenceSampleRate: headers.value(forHTTPHeaderField: Self.presenceSampleRateHeader))
+        }
+        let retryAfter = headers.value(forHTTPHeaderField: "Retry-After")
         if status == 401 {
           // `stop()` reports whether this call is the one that stopped the
           // transport, so two concurrent 401s warn once between them.
@@ -205,7 +213,7 @@ public final class URLSessionTransport: NSObject, MonicaTransport {
   }
 
   private enum Outcome {
-    case status(Int, retryAfter: String?, body: Data?)
+    case status(Int, headers: HTTPURLResponse, body: Data?)
     case failure
   }
 
@@ -222,8 +230,7 @@ public final class URLSessionTransport: NSObject, MonicaTransport {
     var outcome = Outcome.failure
     let task = session.dataTask(with: request) { data, response, error in
       if error == nil, let http = response as? HTTPURLResponse {
-        outcome = .status(http.statusCode, retryAfter: http.value(forHTTPHeaderField: "Retry-After"),
-                          body: Self.errorBody(data, status: http.statusCode))
+        outcome = .status(http.statusCode, headers: http, body: Self.errorBody(data, status: http.statusCode))
       }
       done.signal()
     }
