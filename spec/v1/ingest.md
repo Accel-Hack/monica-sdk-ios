@@ -38,6 +38,7 @@ https://<api key>@<host>/<任意のパス>
 - body は envelope 1 通の JSON を gzip したもの。`Content-Encoding: gzip` を必ず付ける
 - 1 リクエスト = 1 envelope。複数 envelope を連結して送らない
 - 上限を超える分は SDK 側で envelope を分割する。分割の境界は item
+- schema を持つ item の type は `error` と `client_report`。`client_report` は SDK の稼働確認に使い、送り方は `payload.md` にある。それ以外の type は受理したうえで捨てる
 - `sdk.name` は配布 registry での package 名（`@ah-monica/core`、`com.accelhack.monica:monica-core` のように npm / Maven / Composer で公開している名前）、`sdk.version` はその package の版。どちらも空文字にしない。取り込み状況の集計単位になる
 
 ## 上限

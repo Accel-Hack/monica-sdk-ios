@@ -7,10 +7,10 @@ MONICA へ event を送る SDK が守る契約。**これは生成物**で、正
 | ファイル | 中身 |
 | --- | --- |
 | [`index.json`](./index.json) | 索引。全ファイルのパスとダイジェスト、バンドル全体の `revision` |
-| [`envelope.json`](./envelope.json) | envelope と error item の JSON Schema（draft 2020-12） |
+| [`envelope.json`](./envelope.json) | envelope と error item・client_report item の JSON Schema（draft 2020-12） |
 | [`error.json`](./error.json) | Ingest がエラー時に返す body の JSON Schema。`422` の `issues` を含む |
 | [`limits.json`](./limits.json) | envelope の上限値 |
-| [`transport.json`](./transport.json) | HTTP 契約の機械可読な形。ヘッダ、status ごとの挙動、リトライの定数 |
+| [`transport.json`](./transport.json) | HTTP 契約の機械可読な形。ヘッダ、status ごとの挙動、リトライと稼働確認の定数 |
 | [`ingest.md`](./ingest.md) | Ingest API の叩き方 |
 | [`payload.md`](./payload.md) | SDK が負う payload 生成義務 |
 | [`vectors/envelope/`](./vectors/envelope) | envelope の test vectors。受理されるものと拒否されるもの |

@@ -1,0 +1,30 @@
+{
+  "description": "client_report と error の混在。SDK は混ぜて送らないが、受理はされる",
+  "valid": true,
+  "envelope": {
+    "sdk": {
+      "name": "@ah-monica/core",
+      "version": "1.0.0"
+    },
+    "sent_at": "2026-08-30T00:00:00.000Z",
+    "discarded": 0,
+    "items": [
+      {
+        "type": "client_report",
+        "timestamp": "2026-08-30T00:00:00.000Z",
+        "platform": "node",
+        "environment": "production",
+        "trigger": "start"
+      },
+      {
+        "type": "error",
+        "event_id": "123e4567-e89b-42d3-a456-426614174000",
+        "timestamp": "2026-08-30T00:00:00.000Z",
+        "level": "error",
+        "platform": "node",
+        "environment": "production",
+        "message": "boom"
+      }
+    ]
+  }
+}

@@ -40,6 +40,22 @@ grouping が壊れる書き方があるので、SDK が守るべきことをこ�
 - `contexts` は索引されない。構造を持つ付帯情報はこちらに入れる
 - PII の除去は利用者の責任。SDK は推測で値を落とさず、`beforeSend` で利用者に選ばせる
 
+## client_report と稼働確認
+
+- `client_report` は単独の envelope で送る。error と同じ envelope に混ぜない。混ぜても受理はされる
+- 送るのは init 時（`trigger: "start"`）と、直近 `presence.interval_ms`（既定 86400000 ミリ秒）に `202` を受け取った envelope が 1 通も無いとき（`"interval"`）だけ。再送中の envelope は数えない。他の envelope が受理されていれば稼働はそれで分かるので、沈黙しているときにだけ送る。`close()` での `"stop"` は任意で、MONICA は診断用に残すだけ
+- status ごとの挙動とリトライは他の envelope と同じ。`401` で送信を止め、`429` / `5xx` は backoff し、尽きたら捨てて次の interval で送り直す。`discarded` にはそれまでに捨てた件数を載せ、`202` で 0 に戻す
+- `release` は SDK に設定されていれば載せる。`timestamp` は SDK 側の時計で、MONICA は診断用に残すだけ。最終受信は MONICA の受信時刻で測る
+- interval の下限は `presence.min_interval_ms`（60000 ミリ秒）。SDK はこれ未満の値を使わない
+- 長寿命プロセス（Node.js、Java、常駐する PHP）はタイマーで `interval` を送る。serverless（Cloudflare Workers、Next.js の server、AWS Lambda）は isolate ごとに `start` を 1 回だけ送り、タイマーを持たない。日次のタイマーは serverless では発火しない
+- PHP の php-fpm はリクエストごとにプロセスが始まる。前回の送信時刻をローカル（APCu か一時ファイルの mtime）に持ち、interval 以内なら送らない
+- 配布物（browser とモバイル）は public key を使い、端末ごとに interval に 1 回だけ送る。前回 `202` を受けた時刻を端末のストレージ（browser は `localStorage`、無ければ `sessionStorage`。Android は SharedPreferences、iOS は UserDefaults）に持ち、プロセスやタブを再起動しても interval 以内なら送らない
+- モバイル（Android / iOS）はプロセス起動時と、フォアグラウンド復帰時に判定して `"start"` を送る。バックグラウンドではタイマーを持たない。`"stop"` は送らない（OS が kill するので確実に送れない）。`platform` は error item と同じ値で、Android は `java`、iOS は `swift`
+- browser はページ読み込み時に判定して `"start"` を送り、`"interval"` のタイマーを持たない。何日も開きっぱなしのタブは数えない
+- 配布物はさらに `presence.sample_rate`（既定 1、0〜1）の確率で間引ける。既定は間引かない。母数が小さい配布物では間引きが沈黙の誤判定に直結するため、大規模な配布物だけが MONICA の project 設定で下げる。組み込む側のアプリに option は持たせない
+- rate limit は通常の envelope と同じ枠で数える。`client_report` だけの特例は無い
+- `202` の応答に `presence.override_headers` の header（`X-Monica-Presence-Interval-Ms` と `X-Monica-Presence-Sample-Rate`）があれば値を保存し、次の判定から interval と sample rate に使う。値は指数表記を使わない 10 進数（interval は整数のミリ秒）。配布物は端末のストレージ、サーバ SDK はプロセス内に持つ。header が無い応答では保存した値を消さない。値が壊れている（数値でない、interval が整数でないか `presence.min_interval_ms` 未満、rate が `presence.min_sample_rate`（0.01）未満か 1 より大きい）ときはその header を無視する。優先順位は MONICA の設定 > 契約の既定値
+
 ## 確かめ方
 
 [`vectors/envelope/`](./vectors/envelope) の test vectors を自言語で回す。
