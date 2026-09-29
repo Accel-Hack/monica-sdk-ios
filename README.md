@@ -108,17 +108,26 @@ monica.close()                    // flush して crash handler と observer を
 
 ### 稼働確認
 
-起動時とフォアグラウンド復帰時（macOS はアプリが active になったとき）、直近 1 日に受理された envelope が無ければ、
-稼働確認の `client_report` を単独の envelope で送る。起動し続けているアプリでは `flushInterval` の tick でも同じ判定をする。
-設定項目は無く、間隔と間引き率は MONICA 側の project 設定で変わる。
+アプリが動いていることを MONICA に知らせるため、`client_report` item 1 件だけの envelope（`trigger` は `start` か `interval`）を送る。
+endpoint・認証・再試行は error の envelope と同じ。
 
-間隔を数え始めた時刻と MONICA から受け取った設定は `UserDefaults.standard` の次のキーに保存する。
+- 判定する時点: `install()` の直後（`start`）、フォアグラウンド復帰（`start`。macOS はアプリが active になったとき）、
+  `flushInterval` の tick で queue が空のとき（`interval`）。`close()` では送らない
+- 送る条件: 直近の間隔（既定 1 日）に `202` を受けた envelope が無いときだけ。error の envelope の `202` でも間隔は始め直す
+- 送ると決めた時点（間引いた場合も）で次の間隔が始まる。送信に失敗しても、その間隔のうちは送り直さない
+- 間隔と間引き率は MONICA 側の project 設定で決まる。SDK に設定項目は無い。`202` の応答 header
+  `X-Monica-Presence-Interval-Ms`（60000 以上の整数）と `X-Monica-Presence-Sample-Rate`（0.01〜1）を保存し、次の判定から使う。
+  header が無い、または値が範囲外なら保存済みの値（無ければ既定の 1 日 / 間引かない）のまま
+- 間引き率が 1 未満のとき、端末ごとに判定のたびに抽選し、外れたらその間隔は送らない
+- `trackAppLifecycle` が false でもフォアグラウンド復帰は購読する（breadcrumb は残さない）
+
+状態は `UserDefaults.standard` の次のキーに持つので、アプリを再起動しても引き継ぐ。導入側で追加の設定は要らない。
 
 | キー | 値 |
 | --- | --- |
 | `com.accelhack.monica.presence.intervalStartedAt` | 間隔を数え始めた時刻（`Date`）。envelope が受理されたときと、稼働確認を送る（または間引く）と決めたときに書く |
-| `com.accelhack.monica.presence.intervalMs` | 間隔（ミリ秒） |
-| `com.accelhack.monica.presence.sampleRate` | 間引き率（0.01〜1） |
+| `com.accelhack.monica.presence.intervalMs` | MONICA から受け取った間隔（ミリ秒） |
+| `com.accelhack.monica.presence.sampleRate` | MONICA から受け取った間引き率（0.01〜1） |
 
 ### クラッシュ捕捉
 
