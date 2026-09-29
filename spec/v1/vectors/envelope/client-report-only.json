@@ -1,0 +1,21 @@
+{
+  "description": "起動時の client_report だけの envelope。SDK の稼働確認はこの形で送る",
+  "valid": true,
+  "envelope": {
+    "sdk": {
+      "name": "@ah-monica/core",
+      "version": "1.0.0"
+    },
+    "sent_at": "2026-08-30T00:00:00.000Z",
+    "discarded": 0,
+    "items": [
+      {
+        "type": "client_report",
+        "timestamp": "2026-08-30T00:00:00.000Z",
+        "platform": "node",
+        "environment": "production",
+        "trigger": "start"
+      }
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "description": "type が client_report なのに environment が無い。未知 item として通してはいけない",
+  "valid": false,
+  "schema_rejects": true,
+  "envelope": {
+    "sdk": {
+      "name": "@ah-monica/core",
+      "version": "1.0.0"
+    },
+    "sent_at": "2026-08-30T00:00:00.000Z",
+    "discarded": 0,
+    "items": [
+      {
+        "type": "client_report",
+        "timestamp": "2026-08-30T00:00:00.000Z",
+        "platform": "node",
+        "trigger": "start"
+      }
+    ]
+  }
+}

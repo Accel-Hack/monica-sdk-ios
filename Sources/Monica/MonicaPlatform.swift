@@ -14,6 +14,12 @@ public protocol MonicaPlatform {
   /// Starts reporting app lifecycle transitions (`active`, `inactive`,
   /// `background`, `foreground`, `memory_warning`).
   func trackLifecycle(_ listener: @escaping (String) -> Void) -> MonicaCancellable
+  /// Where the presence check keeps its state across launches.
+  var defaults: UserDefaults { get }
+}
+
+public extension MonicaPlatform {
+  var defaults: UserDefaults { .standard }
 }
 
 final class ClosureCancellable: MonicaCancellable {
@@ -25,11 +31,17 @@ final class ClosureCancellable: MonicaCancellable {
   }
 }
 
-/// The platform for any process: environment only, no lifecycle events.
+/// The platform for any process: environment only, and the `active`
+/// transition of an AppKit application (never posted in a command-line tool).
+/// The notification is named by its string so the SDK does not link AppKit.
+/// `Monica` uses it for the presence check only, not as a breadcrumb.
 struct FoundationPlatform: MonicaPlatform {
+  static let didBecomeActive = Notification.Name("NSApplicationDidBecomeActiveNotification")
   var environment: AppleEnvironment? { AppleEnvironment.current() }
   func trackLifecycle(_ listener: @escaping (String) -> Void) -> MonicaCancellable {
-    ClosureCancellable {}
+    let center = NotificationCenter.default
+    let observer = center.addObserver(forName: Self.didBecomeActive, object: nil, queue: nil) { _ in listener("active") }
+    return ClosureCancellable { center.removeObserver(observer) }
   }
 }
 

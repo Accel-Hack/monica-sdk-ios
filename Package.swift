@@ -29,6 +29,7 @@ let package = Package(
       name: "Monica",
       dependencies: ["MonicaCrashHandler"],
       path: "Sources/Monica",
+      resources: [.copy("PrivacyInfo.xcprivacy")],
       linkerSettings: [.linkedLibrary("z")]
     ),
     .testTarget(

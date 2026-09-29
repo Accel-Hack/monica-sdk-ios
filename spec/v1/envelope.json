@@ -23,6 +23,9 @@
             "$ref": "#/$defs/errorItem"
           },
           {
+            "$ref": "#/$defs/clientReportItem"
+          },
+          {
             "$ref": "#/$defs/unknownItem"
           }
         ]
@@ -149,6 +152,51 @@
         "environment"
       ]
     },
+    "clientReportItem": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "client_report"
+        },
+        "timestamp": {
+          "type": "string",
+          "pattern": "^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(?:\\.\\d+)?(Z|[+-](\\d{2}):(\\d{2}))$"
+        },
+        "platform": {
+          "enum": [
+            "javascript",
+            "node",
+            "java",
+            "php",
+            "swift"
+          ],
+          "type": "string"
+        },
+        "environment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "trigger": {
+          "enum": [
+            "start",
+            "interval",
+            "stop"
+          ],
+          "type": "string"
+        },
+        "release": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "timestamp",
+        "platform",
+        "environment",
+        "trigger"
+      ]
+    },
     "unknownItem": {
       "type": "object",
       "properties": {
@@ -166,7 +214,10 @@
         ],
         "properties": {
           "type": {
-            "const": "error"
+            "enum": [
+              "error",
+              "client_report"
+            ]
           }
         }
       }

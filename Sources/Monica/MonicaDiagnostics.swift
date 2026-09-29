@@ -38,10 +38,17 @@ public struct MonicaTransportResult {
   public var errorMessage: String?
   /// `error.issues`. Only a `422` carries them.
   public var issues: [MonicaIssue]
+  /// The raw `X-Monica-Presence-Interval-Ms` / `X-Monica-Presence-Sample-Rate`
+  /// of an accepted response. ``MonicaClient`` validates and keeps them.
+  public var presenceIntervalMs: String?
+  public var presenceSampleRate: String?
 
   public init(accepted: Bool, status: Int? = nil, errorCode: String? = nil, errorMessage: String? = nil,
-              issues: [MonicaIssue] = [], stopped: Bool = false) {
+              issues: [MonicaIssue] = [], stopped: Bool = false, presenceIntervalMs: String? = nil,
+              presenceSampleRate: String? = nil) {
     self.accepted = accepted
+    self.presenceIntervalMs = presenceIntervalMs
+    self.presenceSampleRate = presenceSampleRate
     self.stopped = stopped
     self.status = status
     self.errorCode = errorCode

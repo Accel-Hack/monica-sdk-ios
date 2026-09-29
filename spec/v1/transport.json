@@ -51,5 +51,15 @@
       "jitter_min": 0.5,
       "jitter_max": 1
     }
+  },
+  "presence": {
+    "interval_ms": 86400000,
+    "min_interval_ms": 60000,
+    "sample_rate": 1,
+    "min_sample_rate": 0.01,
+    "override_headers": {
+      "interval_ms": "X-Monica-Presence-Interval-Ms",
+      "sample_rate": "X-Monica-Presence-Sample-Rate"
+    }
   }
 }

@@ -6,6 +6,9 @@ final class RecordingTransport: MonicaTransport {
   private let lock = NSLock()
   private(set) var envelopes: [MonicaEnvelope] = []
   var accept = true
+  /// The presence headers an accepted response carries.
+  var presenceIntervalMs: String?
+  var presenceSampleRate: String?
   private var gate: DispatchSemaphore?
 
   /// Parks the sender inside ``send(_:)`` until ``open()``, and lets every send
@@ -36,6 +39,13 @@ final class RecordingTransport: MonicaTransport {
     // open once it has been opened.
     if let gate { gate.wait(); gate.signal() }
     return accept
+  }
+
+  func deliver(_ envelope: MonicaEnvelope) throws -> MonicaTransportResult {
+    let accepted = try send(envelope)
+    lock.lock(); defer { lock.unlock() }
+    return MonicaTransportResult(accepted: accepted, presenceIntervalMs: accepted ? presenceIntervalMs : nil,
+                                 presenceSampleRate: accepted ? presenceSampleRate : nil)
   }
 
   var items: [MonicaEvent] {
