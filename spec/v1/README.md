@@ -13,6 +13,7 @@ MONICA へ event を送る SDK が守る契約。**これは生成物**で、正
 | [`transport.json`](./transport.json) | HTTP 契約の機械可読な形。ヘッダ、status ごとの挙動、リトライと稼働確認の定数 |
 | [`ingest.md`](./ingest.md) | Ingest API の叩き方 |
 | [`payload.md`](./payload.md) | SDK が負う payload 生成義務 |
+| [`grouping.md`](./grouping.md) | どのエラーが同じ Issue になるかの、SDK 利用者向けの説明 |
 | [`vectors/envelope/`](./vectors/envelope) | envelope の test vectors。受理されるものと拒否されるもの |
 
 配信元は `https://spec.monica.accelhack.net/v1/`。この `v1` は **Ingest API の版**

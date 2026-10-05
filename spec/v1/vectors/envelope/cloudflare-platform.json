@@ -1,0 +1,23 @@
+{
+  "description": "Cloudflare Workers の SDK が送る platform",
+  "valid": true,
+  "envelope": {
+    "sdk": {
+      "name": "@ah-monica/cloudflare",
+      "version": "1.0.0"
+    },
+    "sent_at": "2026-08-30T00:00:00Z",
+    "discarded": 0,
+    "items": [
+      {
+        "type": "error",
+        "event_id": "123e4567-e89b-42d3-a456-426614174099",
+        "timestamp": "2026-08-30T00:00:00Z",
+        "level": "error",
+        "platform": "cloudflare",
+        "environment": "production",
+        "message": "boom"
+      }
+    ]
+  }
+}
