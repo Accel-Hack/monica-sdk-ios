@@ -5,11 +5,10 @@ name: ci
 # 読むだけなので network は要らない。
 #
 # Linux 用 Swift で代替しない理由: UIKit の分岐と CryptoKit が無く、実際の
-# 配布先と条件が変わる。macOS runner は Linux の 10 倍の課金になるが、この
-# repository は SDK そのものなので paths で絞る余地は無い。
+# 配布先と条件が変わる。
 #
-# 配信元との照合（`spec-sync.py --check-remote`）は CI では回さない。公開契約が
-# MONICA 側で動いたことは、取り込み直すときに手元で気付く。
+# 取り込んだ spec/ が配信元と一致しているかも照合する。MONICA 側で公開契約が
+# 動いても、取り込み直すまで誰も気付かないことがあったため。
 
 on:
   pull_request:
@@ -35,6 +34,10 @@ jobs:
       - name: 取り込んだ specが lockと一致するか
         # 契約テストも同じ照合をするが、こちらの方が落ちた理由が読みやすい。
         run: python3 scripts/spec-sync.py --check
+
+      - name: 取り込んだ spec が配信元と一致するか
+        # ここが落ちたら python3 scripts/spec-sync.py で取り込み直し、swift test を通してから commit する
+        run: python3 scripts/spec-sync.py --check-remote
 
       # swift test がテストごとビルドするので、別に swift build は走らせない
       - name: Swift SDK を検証
