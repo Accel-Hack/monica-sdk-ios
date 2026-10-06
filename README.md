@@ -198,6 +198,26 @@ category `app.lifecycle` の breadcrumb に残す（UIKit のあるプラット�
 利用者を指す値は `setUser()` と `beforeSend` で明示したものだけが送られる。
 privacy manifest（`PrivacyInfo.xcprivacy`）を同梱し、UserDefaults の利用理由を `CA92.1` で申告している。
 
+## Issue のまとめ方
+
+どのエラーを同じ Issue にまとめるかは MONICA 側で決まり、SDK は決めない。規則は
+[`spec/v1/grouping.md`](spec/v1/grouping.md) にある。分かれ方が意外なときは、管理画面の
+Issue 詳細の「まとめ方」で、その Issue がどの値でまとめられたかを確かめる。
+
+この SDK に固有の点は次のとおり。
+
+- frame の関数名は、端末上で `dladdr` が返す symbol を demangle したもの。引数の型、generic の型引数、
+  closure の番号は MONICA が無視する
+- strip したビルド（Xcode の archive の既定）では symbol が無く、アプリの frame はバイナリ名だけになる。
+  別のクラッシュが 1 つの Issue にまとまりやすいので、[制約](#制約) のとおり strip を止める
+- Swift の `Error` は throw した時点のスタックを持たず、frame は `captureError` を呼んだ場所のものになる
+  （[event になるもの](#event-になるもの)）。同じ場所で capture した同じ型のエラーは、enum の case や
+  `NSError` の code が違っても 1 つの Issue になる。分けたいときは型を分けるか `fingerprint` を渡す
+- `in_app: true` になるのは、image 名が `inAppModules`（既定は `CFBundleExecutable`）のどれかと一致する
+  frame だけ。アプリのコードを別の framework に置いているなら、その名前も足す
+- `fingerprint` を渡す専用の API は無い。`beforeSend` で `event["fingerprint"] = [...]` とする。元のエラーは
+  `hint.originalError` で取れる。`fingerprint` は既定の分け方を置き換えるので、どこで起きたかの区別も値に含める
+
 ## 送信結果と診断
 
 ingest が envelope を拒んだとき、SDK は `os_log`（subsystem `com.accelhack.monica` / category `transport`）へ
